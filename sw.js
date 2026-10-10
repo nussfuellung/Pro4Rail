@@ -1,6 +1,6 @@
-const CACHE = 'pro4rail-shell-v3';
+const CACHE = 'pro4rail-shell-v5';
 const SHELL = [
-  './', 'index.html', 'app.css', 'app.js', 'store.js', 'pins.js', 'config.js',
+  './', 'index.html', 'app.css', 'app.js', 'store.js', 'pins.js', 'rocrail.js', 'config.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'apple-touch-icon.png', 'favicon-48.png',
   'assets/logo-light.png', 'assets/logo-dark.png',

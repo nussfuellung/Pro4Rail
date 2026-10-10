@@ -57,15 +57,17 @@ function segSet(d) {
 
 export function pinSets(config) {
   const sets = [];
-  (config.displays || []).slice().sort((x, y) => x.slot - y.slot)
+  // Abgewählte Funktionen (Gerät, Reiter "Gerät") brauchen keine Anschlüsse.
+  const on = k => config.features?.[k] !== false;
+  (on('displays') ? config.displays || [] : []).slice().sort((x, y) => x.slot - y.slot)
     .forEach(d => sets.push(d.type === 'seg' ? segSet(d) : tftSet(d)));
-  sets.push({
+  if (on('audio')) sets.push({
     title: 'Lautsprecher: Verstärker MAX98357A',
     sub: 'Der Lautsprecher selbst kommt an die Klemmen des Verstärkers, nicht an den ESP32.',
     rows: [pwr('5V', 'VIN', '', ''), pwr('GND', 'GND', '', ''), io(AUDIO_PINS.bclk, 'BCLK', '', ''), io(AUDIO_PINS.lrc, 'LRC', 'auch WS', ''), io(AUDIO_PINS.din, 'DIN', '', '')],
     notes: ['SD und GAIN offen lassen.'],
   });
-  sets.push({
+  if (on('light')) sets.push({
     title: 'Beleuchtung',
     sub: 'Ein Ausgang für ein MOSFET-Modul oder einen WS2812-Streifen.',
     rows: [pwr('GND', 'GND', 'gemeinsame Masse mit der Lichtversorgung', ''), io(LIGHT_PIN, 'Signal', 'Gate des MOSFET oder DIN des Streifens', '')],

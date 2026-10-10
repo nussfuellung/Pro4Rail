@@ -1,6 +1,7 @@
 import { CONFIG } from './config.js';
 import { DEMO, initStore, Auth, Devices, Media, defaultConfig, uid } from './store.js';
 import { pinSets, BOARD } from './pins.js';
+import { pageRocrail } from './rocrail.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app');
@@ -9,7 +10,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 let user = null;
 let draft = null;      // Arbeitskopie des Geräts, das gerade bearbeitet wird
 let devIndex = 1;      // Nummer in der Geräteliste (Gleisschild)
-let tab = 'anzeigen';
+let tab = 'direkt';
+let cleanup = null;    // Aufräumfunktion der aktuellen Seite (zum Beispiel Live-Abo bei Rocrail)
+const openDisp = new Set(); // aufgeklappte Anzeigen auf der Geräteseite
 let dirty = false;
 let mediaList = [];
 let player = null;     // laufende MP3-Vorschau
@@ -135,6 +138,7 @@ const routes = [
   [/^#\/?$/, pageDevices],
   [/^#\/add$/, pageAdd],
   [/^#\/device\/(.+)$/, pageDevice],
+  [/^#\/rocrail$/, () => pageRocrail(app, { esc, toast })],
   [/^#\/media$/, pageMedia],
   [/^#\/installer$/, pageInstaller],
   [/^#\/account$/, pageAccount],
@@ -144,13 +148,14 @@ async function route() {
   user = await Auth.user();
   $('#banner').textContent = DEMO ? 'Demo-Modus: Die Daten bleiben nur in diesem Browser. Trage in config.js dein Backend ein, um echte Geräte zu koppeln.' : '';
   const h = location.hash || '#/';
-  const key = /^#\/(media|installer|account)/.test(h) ? h.split('/')[1] : '';
+  const key = /^#\/(rocrail|media|installer|account)/.test(h) ? h.split('/')[1] : '';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === key));
+  if (cleanup) { try { cleanup(); } catch (e) { /* egal */ } cleanup = null; }
   if (!user) return pageLogin();
   for (const [re, fn] of routes) {
     const m = h.match(re);
     if (m) {
-      try { await fn(m[1]); window.scrollTo(0, 0); }
+      try { const r = await fn(m[1]); if (typeof r === 'function') cleanup = r; window.scrollTo(0, 0); }
       catch (e) { app.innerHTML = `<div class="panel"><h2>Das hat nicht geklappt</h2><p>${esc(e.message || e)}</p><a class="btn ghost" href="#/">Zur Geräteliste</a></div>`; }
       return;
     }
@@ -315,12 +320,14 @@ async function pageDevice(id) {
   draft = JSON.parse(JSON.stringify(list[idx]));
   const base = defaultConfig();
   draft.config = { ...base, ...draft.config };
+  draft.config.features = { ...base.features, ...draft.config.features };
   draft.config.light = { ...base.light, ...draft.config.light };
   draft.config.audio = { ...base.audio, ...draft.config.audio };
   if (!Array.isArray(draft.config.audio.rules)) draft.config.audio.rules = [];
   if (!Array.isArray(draft.config.displays)) draft.config.displays = [];
   mediaList = await Media.list();
-  tab = 'anzeigen'; dirty = false;
+  tab = 'direkt'; dirty = false;
+  openDisp.clear(); if (draft.config.displays[0]) openDisp.add(draft.config.displays[0].slot);
   renderDevice();
 }
 
@@ -329,7 +336,34 @@ function markDirty() {
   const sb = $('.savebar'); if (sb) sb.classList.add('changed');
 }
 
-const TABS = [['anzeigen', 'Anzeigen'], ['ansagen', 'Ansagen'], ['licht', 'Licht'], ['pins', 'Anschlüsse'], ['geraet', 'Gerät']];
+const feat = k => draft.config.features?.[k] !== false;
+// Reiter, die zu abgewählten Funktionen gehören, verschwinden.
+function visibleTabs() {
+  return [['direkt', 'Direkt', true], ['anzeigen', 'Anzeigen', feat('displays')], ['ansagen', 'Ansagen', feat('audio')],
+    ['licht', 'Licht', feat('light')], ['pins', 'Anschlüsse', true], ['geraet', 'Gerät', true]].filter(t => t[2]);
+}
+
+function tabDirekt() {
+  const c = draft.config;
+  const items = [];
+  if (feat('light')) items.push(`<div class="fn"><div class="fn-main"><b>Licht</b><small>Beleuchtung am Gerät</small></div>
+      <label class="switch"><input type="checkbox" data-d="light-on" aria-label="Licht" ${c.light.on ? 'checked' : ''}><span class="tr"></span><span class="tx">${c.light.on ? 'An' : 'Aus'}</span></label></div>
+    <div class="fn slide"><label class="field"><span class="lbl">Helligkeit <b class="val">${c.light.brightness}%</b></span>
+      <input type="range" min="0" max="100" data-d="light-bri" value="${c.light.brightness}"></label></div>`);
+  if (feat('audio')) {
+    items.push(`<div class="fn slide"><label class="field"><span class="lbl">Lautstärke <b class="val">${c.audio.volume}%</b></span>
+      <input type="range" min="0" max="100" data-d="vol" value="${c.audio.volume}"></label></div>`);
+    const rules = c.audio.rules.map((r, i) => r.mediaId ? `<div class="fn"><div class="fn-main"><b>${esc(r.name)}</b><small>${esc(ruleSummary(r))}</small></div>
+      <button type="button" class="small" data-d="play" data-i="${i}">Abspielen</button></div>` : '').join('');
+    items.push(rules || `<div class="fn"><div class="fn-main"><b>Ansagen</b><small>Noch keine Ansage mit MP3. Lege sie im Reiter Ansagen an.</small></div></div>`);
+  }
+  if (feat('displays')) c.displays.forEach(d => items.push(`<div class="fn"><div class="fn-main"><b>Anzeige ${d.slot}</b><small>${d.station ? esc(d.station.name) : 'Kein Bahnhof gewählt'}</small></div>
+      <button type="button" class="ghost small" data-d="refresh" data-slot="${d.slot}">Aktualisieren</button></div>`));
+  const off = !DEMO && !isOnline(draft) ? '<p class="callout">Das Gerät ist gerade offline. Befehle kommen erst an, wenn es sich wieder meldet.</p>' : '';
+  return `${off}${items.length ? `<div class="panel fnlist">${items.join('')}</div>`
+    : '<div class="panel empty"><h2>Keine Funktion aktiv</h2><p class="muted">Aktiviere im Reiter Gerät, was an diesem Gerät verbaut ist.</p></div>'}
+    <p class="hint">Hier wirkt jede Änderung sofort. Sie wird auch dauerhaft gespeichert.</p>`;
+}
 
 function tabAnzeigen() {
   const c = draft.config;
@@ -338,9 +372,9 @@ function tabAnzeigen() {
     const p = `config.displays.${i}`;
     const isSeg = d.type === 'seg';
     const needsStation = ['abfahrt', 'min_bis', 'zeit', 'verspaetung', 'gleis'].includes(d.content);
-    return `<section class="panel disp">
-      <div class="disp-head"><h3>Anzeige ${d.slot}</h3>
-        <div class="row"><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div></div>
+    const sum = isSeg ? `${SEG_KINDS[d.seg.kind]}, ${d.seg.driver}` : `TFT ${d.tft.model}`;
+    return `<details class="panel disp" data-slot="${d.slot}" ${openDisp.has(d.slot) ? 'open' : ''}>
+      <summary><span class="disp-t"><b>Anzeige ${d.slot}</b><small>${esc(sum)}${d.station ? ', ' + esc(d.station.name) : ''}</small></span><i class="chev" aria-hidden="true"></i></summary>
       <div class="grid">
         <label class="field"><span class="lbl">Bauart</span>${sel(`${p}.type`, d.type, [['tft', 'TFT-Display'], ['seg', 'LED-Segmentanzeige']], 'data-rerender')}</label>
         ${isSeg ? `
@@ -356,7 +390,8 @@ function tabAnzeigen() {
       ${needsStation ? `<div style="margin-top:14px"><label class="field"><span class="lbl">Bahnhof${d.station ? `: <strong style="color:var(--ink)">${esc(d.station.name)}</strong>` : ''}</span>
         <input type="text" placeholder="Bahnhof suchen" data-search="${i}" autocomplete="off"></label><div class="res" id="res${i}" hidden></div></div>` : ''}
       <div class="prev" data-prev="${i}"><p class="hint">Vorschau wird geladen</p></div>
-    </section>`;
+      <div class="row disp-foot"><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
+    </details>`;
   }).join('');
   const add = c.displays.length < 3
     ? `<button type="button" class="${c.displays.length ? 'ghost' : ''}" data-act="add">Anzeige hinzufügen</button>`
@@ -398,6 +433,11 @@ function tabPins() {
 function tabGeraet() {
   return `<section class="panel" style="max-width:560px"><label class="field"><span class="lbl">Name des Geräts</span><input type="text" data-k="name" value="${esc(draft.name)}"></label>
     <p class="hint">Geräte-ID: ${esc(draft.device_uid)}</p></section>
+    <section class="section" style="margin-top:32px;max-width:560px"><h2>Funktionen</h2>
+      <p class="muted">Schalte ab, was an diesem Gerät nicht verbaut ist. Die Funktion verschwindet aus der App und braucht keine Anschlüsse. Einstellungen bleiben erhalten.</p>
+      <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder Segmentanzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
+        <div class="fn"><div class="fn-main"><b>${t}</b><small>${s}</small></div>
+          <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>`).join('')}</div></section>
     <section class="section" style="margin-top:32px;max-width:560px"><h2>Gerät entkoppeln</h2>
       <p class="muted">Das Gerät verschwindet aus deinem Konto und muss danach neu eingerichtet werden.</p>
       <button type="button" class="danger" data-act="del">Gerät entkoppeln</button></section>`;
@@ -405,13 +445,15 @@ function tabGeraet() {
 
 function renderDevice() {
   const y = window.scrollY;
-  const body = { anzeigen: tabAnzeigen, ansagen: tabAnsagen, licht: tabLicht, pins: tabPins, geraet: tabGeraet }[tab]();
+  if (!visibleTabs().some(t => t[0] === tab)) tab = 'direkt';
+  const body = { direkt: tabDirekt, anzeigen: tabAnzeigen, ansagen: tabAnsagen, licht: tabLicht, pins: tabPins, geraet: tabGeraet }[tab]();
   app.innerHTML = `
     <div class="pagehead"><div class="lead"><span class="gleis" aria-hidden="true">${devIndex}</span><div><h1>${esc(draft.name)}</h1>${statusHtml(draft)}</div></div></div>
-    <div class="tabs" role="tablist">${TABS.map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+    <div class="tabs" role="tablist">${visibleTabs().map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
     ${body}
     <div class="savebar ${dirty ? 'changed' : ''}"><span class="clean">Alles gespeichert</span><span class="dirty">Ungespeicherte Änderungen</span><button type="button" data-act="save">Speichern</button></div>`;
   window.scrollTo(0, y);
+  app.querySelector('.tabs .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   bindDevice();
   if (tab === 'anzeigen') fillPreviews();
 }
@@ -426,6 +468,44 @@ async function fillPreviews() {
   }));
 }
 
+async function directSave(mutate, cmdType, payload) {
+  try {
+    await Devices.patchConfig(draft.id, mutate);
+    if (cmdType) await Devices.command(draft.id, cmdType, payload);
+  } catch (e) { toast('Senden nicht möglich: ' + e.message); }
+}
+
+function bindDirect() {
+  const c = draft.config;
+  app.querySelectorAll('[data-d]').forEach(el => {
+    const d = el.dataset.d;
+    if (el.type === 'range') el.addEventListener('input', () => { const b = el.closest('.field')?.querySelector('.val'); if (b) b.textContent = el.value + '%'; });
+    if (d === 'light-on') el.onchange = () => {
+      c.light.on = el.checked; const tx = el.closest('.switch').querySelector('.tx'); if (tx) tx.textContent = el.checked ? 'An' : 'Aus';
+      directSave(x => { x.light = { ...(x.light || {}), on: c.light.on }; }, 'light', c.light);
+    };
+    else if (d === 'light-bri') el.onchange = () => {
+      c.light.brightness = Number(el.value);
+      directSave(x => { x.light = { ...(x.light || {}), brightness: c.light.brightness }; }, 'light', c.light);
+    };
+    else if (d === 'vol') el.onchange = () => {
+      c.audio.volume = Number(el.value);
+      directSave(x => { x.audio = { ...(x.audio || {}), volume: c.audio.volume }; }, 'volume', { volume: c.audio.volume });
+    };
+    else if (d === 'play') el.onclick = async () => {
+      const r = c.audio.rules[Number(el.dataset.i)];
+      try {
+        await Devices.command(draft.id, 'announce', { rule: r, volume: c.audio.volume });
+        if (DEMO) { await hearRule(r); toast('Demo: Die Ansage läuft in diesem Browser.'); } else toast('Ansage gesendet');
+      } catch (e) { toast('Senden nicht möglich: ' + e.message); }
+    };
+    else if (d === 'refresh') el.onclick = async () => {
+      try { depCache.clear(); await Devices.command(draft.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
+      catch (e) { toast('Senden nicht möglich: ' + e.message); }
+    };
+  });
+}
+
 let lightTimer;
 function sendLight() {
   clearTimeout(lightTimer);
@@ -434,6 +514,11 @@ function sendLight() {
 
 function bindDevice() {
   app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; renderDevice(); window.scrollTo(0, 0); });
+
+  app.querySelectorAll('details[data-slot]').forEach(d => d.addEventListener('toggle', () => {
+    const s = Number(d.dataset.slot); d.open ? openDisp.add(s) : openDisp.delete(s);
+  }));
+  bindDirect();
 
   app.querySelectorAll('[data-k]').forEach(el => {
     const val = () => {
@@ -486,7 +571,7 @@ function bindDevice() {
     if (a === 'add') {
       const used = draft.config.displays.map(d => d.slot);
       const slot = [1, 2, 3].find(s => !used.includes(s));
-      draft.config.displays.push(newDisplay(slot)); markDirty(); renderDevice();
+      draft.config.displays.push(newDisplay(slot)); openDisp.add(slot); markDirty(); renderDevice();
     } else if (a === 'rm') {
       const slot = draft.config.displays[i].slot;
       draft.config.displays.splice(i, 1);
