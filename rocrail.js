@@ -162,7 +162,7 @@ export async function pageRocrail(app, { esc, toast }) {
       catch (e) { toast(e.message); }
     };
     const demo = app.querySelector('#rr-demo'); if (demo) demo.onclick = async () => { await Rocrail.useDemoPlan(); row = await Rocrail.get(); render(); };
-    const rl = app.querySelector('#rr-reload'); if (rl) rl.onclick = async () => { row = await Rocrail.get(); render(); toast('Aktualisiert'); };
+    const rl = app.querySelector('#rr-reload'); if (rl) rl.onclick = async () => { await send('plan_reload', {}); toast('Plan wird bei Rocrail neu angefragt'); setTimeout(async () => { row = await Rocrail.get(); render(); }, 2500); };
   }
 
   const off = Rocrail.subscribe(r => {

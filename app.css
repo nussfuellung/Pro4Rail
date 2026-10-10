@@ -10,7 +10,7 @@
 :root{
   color-scheme:light;
   --bg:#e8ecef;--panel:#f6f8f9;--panel2:#dde3e8;--ink:#141d28;--ink2:#47566a;--line:#c3ccd5;
-  --brand:#1b4f8a;--on-brand:#ffffff;--signal:#f0a800;--ok:#1c7c45;--bad:#b3261e;
+  --brand:#07727a;--on-brand:#ffffff;--signal:#f0a800;--ok:#1c7c45;--bad:#b3261e;
   --tie:#b4bec8;--rail:#6c7a8a;
   --navh:0px;--r:6px;
   --sans:"Barlow","Segoe UI",system-ui,sans-serif;
@@ -19,7 +19,7 @@
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#151c26;--panel:#1d2631;--panel2:#263241;--ink:#e7ecf2;--ink2:#9eacbd;--line:#324053;
-  --brand:#7fb0e8;--on-brand:#0d1a2a;--signal:#f2b21a;--ok:#4fc482;--bad:#ff7a6e;
+  --brand:#4fd0d8;--on-brand:#0a1a22;--signal:#f2b21a;--ok:#4fc482;--bad:#ff7a6e;
   --tie:#3b4a5d;--rail:#6d8097;
 }
 *{box-sizing:border-box}
@@ -286,9 +286,36 @@ details.disp>.grid{margin-top:16px}
   .fn{padding:12px 14px}
 }
 @media (max-width:420px){
-  .fn:not(.slide){flex-wrap:wrap}
-  .fn:not(.slide) button{width:100%}
+  .fn:has(>button){flex-wrap:wrap}
+  .fn:has(>button) button{width:100%}
   .disp-foot button{flex:1}
+}
+
+/* ---------- Startseite Direkt ---------- */
+.alllights{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:24px;border-left:4px solid var(--brand)}
+.dgroup{margin-bottom:26px}
+.dg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.dg-head h2{margin:0;font-size:22px}
+.dg-head h2 a{color:var(--ink)}
+.fn.sub{background:var(--bg);padding-left:28px}
+.callout.warn{border-left-color:var(--signal)}
+
+/* ---------- Dialoge ---------- */
+dialog.dlg{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);color:var(--ink);padding:0;width:min(420px,calc(100vw - 32px));box-shadow:0 18px 50px rgba(8,16,24,.35)}
+dialog.dlg::backdrop{background:rgba(8,16,24,.55)}
+dialog.dlg form{padding:20px 20px 16px}
+dialog.dlg h2{margin:0 0 8px;font-size:22px}
+dialog.dlg p{margin:0 0 20px;color:var(--ink2)}
+.dlg-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+@media (max-width:520px){dialog.dlg{margin:auto auto calc(16px + env(safe-area-inset-bottom))}.dlg-btns button{flex:1;min-height:48px}}
+button.danger.solid{background:var(--bad);color:#fff;border-color:var(--bad)}
+button.danger.solid:hover{background:var(--bad);color:#fff;filter:brightness(1.08)}
+
+/* Der Web-Installer braucht USB am Computer und wird auf Handys und Tablets ausgeblendet. */
+.desktop-hint{display:none;margin:2px 0 0}
+@media (max-width:720px),(hover:none) and (pointer:coarse){
+  .desktop-only{display:none!important}
+  .desktop-hint{display:block}
 }
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

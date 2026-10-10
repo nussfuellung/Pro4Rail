@@ -1,0 +1,10 @@
+{
+  "name": "pro4rail-rocrail-bridge",
+  "version": "0.1.0",
+  "description": "Verbindet Rocrail (TCP, Port 8051) mit der Pro4Rail-App über Supabase. Keine Abhängigkeiten.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node src/bridge.mjs", "test": "node --test test/bridge.test.mjs" },
+  "license": "UNLICENSED"
+}

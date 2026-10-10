@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { DEMO, initStore, Auth, Devices, Media, defaultConfig, uid } from './store.js';
-import { pinSets, BOARD } from './pins.js';
+import { pinSets, BOARDS, boardOf, boardWarnings } from './pins.js';
 import { pageRocrail } from './rocrail.js';
 
 const $ = s => document.querySelector(s);
@@ -46,6 +46,20 @@ function statusHtml(d) {
 }
 const opt = (v, label, cur) => `<option value="${esc(v)}" ${String(cur) === String(v) ? 'selected' : ''}>${esc(label)}</option>`;
 const sel = (path, cur, opts, attrs = '') => `<select data-k="${path}" ${attrs}>${opts.map(([v, l]) => opt(v, l, cur)).join('')}</select>`;
+
+// Eigener Bestätigungsdialog im Look der App (statt confirm() des Browsers).
+function ask({ title, text, ok = 'OK', danger = false }) {
+  return new Promise(res => {
+    const d = document.createElement('dialog'); d.className = 'dlg';
+    d.setAttribute('aria-labelledby', 'dlg-t');
+    d.innerHTML = `<form method="dialog"><h2 id="dlg-t">${esc(title)}</h2><p>${esc(text)}</p>
+      <div class="dlg-btns"><button value="no" class="ghost">Abbrechen</button><button value="yes" class="${danger ? 'danger solid' : ''}">${esc(ok)}</button></div></form>`;
+    document.body.appendChild(d);
+    d.addEventListener('close', () => { res(d.returnValue === 'yes'); d.remove(); });
+    d.addEventListener('click', e => { if (e.target === d) d.close('no'); });
+    d.showModal();
+  });
+}
 
 function toggleTheme() {
   const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -135,7 +149,8 @@ async function previewHtml(disp) {
 
 // ---------- Router ----------
 const routes = [
-  [/^#\/?$/, pageDevices],
+  [/^#\/?$/, pageDirekt],
+  [/^#\/devices$/, pageDevices],
   [/^#\/add$/, pageAdd],
   [/^#\/device\/(.+)$/, pageDevice],
   [/^#\/rocrail$/, () => pageRocrail(app, { esc, toast })],
@@ -148,7 +163,8 @@ async function route() {
   user = await Auth.user();
   $('#banner').textContent = DEMO ? 'Demo-Modus: Die Daten bleiben nur in diesem Browser. Trage in config.js dein Backend ein, um echte Geräte zu koppeln.' : '';
   const h = location.hash || '#/';
-  const key = /^#\/(rocrail|media|installer|account)/.test(h) ? h.split('/')[1] : '';
+  const seg1 = h.split('/')[1] || '';
+  const key = seg1 === 'device' || seg1 === 'add' ? 'devices' : ['devices', 'rocrail', 'media', 'installer', 'account'].includes(seg1) ? seg1 : '';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === key));
   if (cleanup) { try { cleanup(); } catch (e) { /* egal */ } cleanup = null; }
   if (!user) return pageLogin();
@@ -156,7 +172,7 @@ async function route() {
     const m = h.match(re);
     if (m) {
       try { const r = await fn(m[1]); if (typeof r === 'function') cleanup = r; window.scrollTo(0, 0); }
-      catch (e) { app.innerHTML = `<div class="panel"><h2>Das hat nicht geklappt</h2><p>${esc(e.message || e)}</p><a class="btn ghost" href="#/">Zur Geräteliste</a></div>`; }
+      catch (e) { app.innerHTML = `<div class="panel"><h2>Das hat nicht geklappt</h2><p>${esc(e.message || e)}</p><a class="btn ghost" href="#/devices">Zur Geräteliste</a></div>`; }
       return;
     }
   }
@@ -181,7 +197,7 @@ function pageLogin() {
 function pageAccount() {
   app.innerHTML = `<div class="pagehead"><h1>Konto</h1></div><div class="panel" style="max-width:520px"><p><strong>${esc(user.email)}</strong></p>
     ${DEMO ? '<p class="muted">Im Demo-Modus ist keine Anmeldung nötig. Alle Daten liegen nur in diesem Browser.</p><button id="reset" class="danger">Demo-Daten löschen</button>' : '<button id="out" class="ghost">Abmelden</button>'}</div>`;
-  if (DEMO) $('#reset').onclick = () => { if (confirm('Alle Demo-Daten in diesem Browser löschen?')) { Object.keys(localStorage).filter(k => k.startsWith('demo_')).forEach(k => localStorage.removeItem(k)); location.hash = '#/'; location.reload(); } };
+  if (DEMO) $('#reset').onclick = async () => { if (await ask({ title: 'Demo-Daten löschen?', text: 'Alle Demo-Daten in diesem Browser werden gelöscht.', ok: 'Löschen', danger: true })) { Object.keys(localStorage).filter(k => k.startsWith('demo_')).forEach(k => localStorage.removeItem(k)); location.hash = '#/'; location.reload(); } };
   else $('#out').onclick = async () => { await Auth.signOut(); route(); };
 }
 
@@ -208,7 +224,7 @@ async function pageAdd() {
   app.innerHTML = `<div class="pagehead"><h1>Gerät hinzufügen</h1></div>
   <div class="panel" style="margin-bottom:16px">
     <ol class="steps">
-      <li><div><h3>Firmware installieren</h3><p class="muted" style="margin:2px 0 8px">Nur bei einem neuen ESP32 ohne Pro4Rail-Firmware nötig. Der Installer arbeitet per USB am Computer.</p><a class="btn ghost small" href="#/installer">Zum Installer</a></div></li>
+      <li><div><h3>Firmware installieren</h3><p class="muted" style="margin:2px 0 8px">Nur bei einem neuen ESP32 ohne Pro4Rail-Firmware nötig. Der Installer arbeitet per USB am Computer.</p><a class="btn ghost small desktop-only" href="#/installer">Zum Installer</a><p class="muted desktop-hint">Der Installer funktioniert nur am Computer mit Chrome oder Edge.</p></div></li>
       <li><div><h3>Kopplungscode erzeugen</h3><p class="muted" style="margin:2px 0 8px">Der Code gilt 15 Minuten und nur für ein Gerät.</p><button id="gen" class="small">Code erzeugen</button><div id="codebox" style="margin-top:14px"></div></div></li>
       <li><div><h3>Mit dem WLAN des Geräts verbinden</h3><p class="muted" style="margin:2px 0 0">Der ESP32 öffnet nach dem Einschalten ein WLAN mit dem Namen Tafel und vier Zeichen dahinter. Verbinde dein Handy damit. Das Einrichtungsfenster öffnet sich von selbst, sonst rufst du <strong>192.168.4.1</strong> im Browser auf.</p></div></li>
       <li><div><h3>WLAN und Code eingeben</h3><p class="muted" style="margin:2px 0 0">Wähle dein Heimnetz, gib das Passwort und den Kopplungscode ein und speichere. Danach erscheint das Gerät in deiner Liste.</p></div></li>
@@ -243,9 +259,9 @@ function daysText(days) {
   return d.map(x => DAYS[x - 1]).join(', ');
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-function ruleSummary(r) {
+function ruleSummary(r, cfg = draft.config) {
   if (r.trigger === 'zeit') return `${daysText(r.days || [])} um ${r.time || '--:--'} Uhr`;
-  const d = draft.config.displays.find(x => x.slot === r.slot && x.station);
+  const d = cfg.displays.find(x => x.slot === r.slot && x.station);
   if (!d) return 'Wähle zuerst bei einer Anzeige einen Bahnhof.';
   const where = ` am Bahnhof ${d.station.name}${d.filter ? ' (Linien ' + d.filter + ')' : ''}`;
   if (r.trigger === 'abfahrt') return `${plural(r.minBefore, 'Minute', 'Minuten')} vor jeder Abfahrt${where}`;
@@ -292,7 +308,7 @@ function ruleHtml(r, i) {
     </div></div>`;
 }
 
-async function hearRule(r) {
+async function hearRule(r, cfg = draft?.config) {
   if (player) { player.pause(); player = null; }
   speechSynthesis?.cancel?.();
   if (!r.mediaId) { toast('Wähle zuerst eine MP3 oder die automatische Ansage.'); return false; }
@@ -301,30 +317,36 @@ async function hearRule(r) {
       : r.trigger === 'abfahrt' ? 'Der RE 5 nach Koblenz, Gleis 3, fährt in 2 Minuten ab.'
       : 'Hinweis: Dies ist eine Ansage nach Zeitplan.';
     if (!('speechSynthesis' in window)) { toast('Dieser Browser kann die Beispielansage nicht sprechen.'); return false; }
-    const u = new SpeechSynthesisUtterance(text); u.lang = 'de-DE'; u.volume = draft.config.audio.volume / 100;
+    const u = new SpeechSynthesisUtterance(text); u.lang = 'de-DE'; u.volume = cfg.audio.volume / 100;
     speechSynthesis.speak(u); return true;
   }
   const item = mediaList.find(m => m.id === r.mediaId);
   const url = item ? await Media.url(item) : null;
   if (!url) { toast('Diese Datei ist hier nicht abspielbar. Lade die MP3 bei den Medien erneut hoch.'); return false; }
-  player = new Audio(url); player.volume = draft.config.audio.volume / 100;
+  player = new Audio(url); player.volume = cfg.audio.volume / 100;
   try { await player.play(); return true; } catch (e) { toast('Wiedergabe nicht möglich: ' + e.message); return false; }
 }
 
 // ---------- Gerät bearbeiten ----------
+function normConfig(c) {
+  const base = defaultConfig();
+  const o = { ...base, ...c };
+  o.features = { ...base.features, ...o.features };
+  o.light = { ...base.light, ...o.light };
+  o.audio = { ...base.audio, ...o.audio };
+  if (!BOARDS[o.board]) o.board = base.board;
+  if (!Array.isArray(o.audio.rules)) o.audio.rules = [];
+  if (!Array.isArray(o.displays)) o.displays = [];
+  return o;
+}
+
 async function pageDevice(id) {
   const list = await Devices.list();
   const idx = list.findIndex(d => d.id === id);
-  if (idx < 0) { location.hash = '#/'; return; }
+  if (idx < 0) { location.hash = '#/devices'; return; }
   devIndex = idx + 1;
   draft = JSON.parse(JSON.stringify(list[idx]));
-  const base = defaultConfig();
-  draft.config = { ...base, ...draft.config };
-  draft.config.features = { ...base.features, ...draft.config.features };
-  draft.config.light = { ...base.light, ...draft.config.light };
-  draft.config.audio = { ...base.audio, ...draft.config.audio };
-  if (!Array.isArray(draft.config.audio.rules)) draft.config.audio.rules = [];
-  if (!Array.isArray(draft.config.displays)) draft.config.displays = [];
+  draft.config = normConfig(draft.config);
   mediaList = await Media.list();
   tab = 'direkt'; dirty = false;
   openDisp.clear(); if (draft.config.displays[0]) openDisp.add(draft.config.displays[0].slot);
@@ -343,26 +365,56 @@ function visibleTabs() {
     ['licht', 'Licht', feat('light')], ['pins', 'Anschlüsse', true], ['geraet', 'Gerät', true]].filter(t => t[2]);
 }
 
-function tabDirekt() {
-  const c = draft.config;
+const lightPayload = c => ({ on: c.light.on, brightness: c.light.dimmable === false ? 100 : c.light.brightness });
+
+// Funktionsliste eines Geräts. Wird im Reiter Direkt und auf der Startseite verwendet.
+function fnItems(dev) {
+  const c = dev.config; const did = `data-dev="${esc(dev.id)}"`;
   const items = [];
-  if (feat('light')) items.push(`<div class="fn"><div class="fn-main"><b>Licht</b><small>Beleuchtung am Gerät</small></div>
-      <label class="switch"><input type="checkbox" data-d="light-on" aria-label="Licht" ${c.light.on ? 'checked' : ''}><span class="tr"></span><span class="tx">${c.light.on ? 'An' : 'Aus'}</span></label></div>
-    <div class="fn slide"><label class="field"><span class="lbl">Helligkeit <b class="val">${c.light.brightness}%</b></span>
-      <input type="range" min="0" max="100" data-d="light-bri" value="${c.light.brightness}"></label></div>`);
-  if (feat('audio')) {
-    items.push(`<div class="fn slide"><label class="field"><span class="lbl">Lautstärke <b class="val">${c.audio.volume}%</b></span>
-      <input type="range" min="0" max="100" data-d="vol" value="${c.audio.volume}"></label></div>`);
-    const rules = c.audio.rules.map((r, i) => r.mediaId ? `<div class="fn"><div class="fn-main"><b>${esc(r.name)}</b><small>${esc(ruleSummary(r))}</small></div>
-      <button type="button" class="small" data-d="play" data-i="${i}">Abspielen</button></div>` : '').join('');
-    items.push(rules || `<div class="fn"><div class="fn-main"><b>Ansagen</b><small>Noch keine Ansage mit MP3. Lege sie im Reiter Ansagen an.</small></div></div>`);
+  if (c.features.light) {
+    items.push(`<div class="fn"><div class="fn-main"><b>Licht</b><small>Beleuchtung am Gerät</small></div>
+      <label class="switch"><input type="checkbox" data-d="light-on" ${did} aria-label="Licht ${esc(dev.name)}" ${c.light.on ? 'checked' : ''}><span class="tr"></span><span class="tx">${c.light.on ? 'An' : 'Aus'}</span></label></div>`);
+    if (c.light.dimmable !== false) items.push(`<div class="fn slide"><label class="field"><span class="lbl">Helligkeit <b class="val">${c.light.brightness}%</b></span>
+      <input type="range" min="0" max="100" data-d="light-bri" ${did} value="${c.light.brightness}"></label></div>`);
   }
-  if (feat('displays')) c.displays.forEach(d => items.push(`<div class="fn"><div class="fn-main"><b>Anzeige ${d.slot}</b><small>${d.station ? esc(d.station.name) : 'Kein Bahnhof gewählt'}</small></div>
-      <button type="button" class="ghost small" data-d="refresh" data-slot="${d.slot}">Aktualisieren</button></div>`));
+  if (c.features.audio) {
+    items.push(`<div class="fn slide"><label class="field"><span class="lbl">Lautstärke <b class="val">${c.audio.volume}%</b></span>
+      <input type="range" min="0" max="100" data-d="vol" ${did} value="${c.audio.volume}"></label></div>`);
+    const rules = c.audio.rules.map((r, i) => r.mediaId ? `<div class="fn"><div class="fn-main"><b>${esc(r.name)}</b><small>${esc(ruleSummary(r, c))}</small></div>
+      <button type="button" class="small" data-d="play" ${did} data-i="${i}">Abspielen</button></div>` : '').join('');
+    items.push(rules || `<div class="fn"><div class="fn-main"><b>Ansagen</b><small>Noch keine Ansage mit MP3. Lege sie am Gerät im Reiter Ansagen an.</small></div></div>`);
+  }
+  if (c.features.displays) c.displays.forEach(d => items.push(`<div class="fn"><div class="fn-main"><b>Anzeige ${d.slot}</b><small>${d.station ? esc(d.station.name) : 'Kein Bahnhof gewählt'}</small></div>
+      <button type="button" class="ghost small" data-d="refresh" ${did} data-slot="${d.slot}">Aktualisieren</button></div>`));
+  return items.length ? `<div class="panel fnlist">${items.join('')}</div>`
+    : '<div class="panel empty"><h2>Keine Funktion aktiv</h2><p class="muted">Aktiviere am Gerät im Reiter Gerät, was verbaut ist.</p></div>';
+}
+
+function tabDirekt() {
   const off = !DEMO && !isOnline(draft) ? '<p class="callout">Das Gerät ist gerade offline. Befehle kommen erst an, wenn es sich wieder meldet.</p>' : '';
-  return `${off}${items.length ? `<div class="panel fnlist">${items.join('')}</div>`
-    : '<div class="panel empty"><h2>Keine Funktion aktiv</h2><p class="muted">Aktiviere im Reiter Gerät, was an diesem Gerät verbaut ist.</p></div>'}
-    <p class="hint">Hier wirkt jede Änderung sofort. Sie wird auch dauerhaft gespeichert.</p>`;
+  return `${off}${fnItems(draft)}<p class="hint">Hier wirkt jede Änderung sofort. Sie wird auch dauerhaft gespeichert.</p>`;
+}
+
+// Startseite: alle Geräte mit ihren Funktionen, dazu Schalter für alle Lichter.
+async function pageDirekt() {
+  const list = await Devices.list();
+  const devs = list.map(d => ({ ...d, config: normConfig(d.config) }));
+  const lit = devs.filter(d => d.config.features.light);
+  if (!devs.length) {
+    app.innerHTML = `<div class="pagehead"><h1>Direkt</h1></div><div class="panel empty"><h2>Noch kein Gerät</h2><p class="muted">Sobald du ein Gerät eingerichtet hast, bedienst du hier alles direkt.</p><a class="btn" href="#/add">Gerät hinzufügen</a></div>`;
+    return;
+  }
+  app.innerHTML = `<div class="pagehead"><h1>Direkt</h1></div>
+    ${lit.length ? `<div class="panel alllights"><div class="fn-main"><b>Alle Lichter</b><small>${plural(lit.length, 'Gerät', 'Geräte')} mit Licht</small></div>
+      <div class="row"><button type="button" data-all="1">Alle an</button><button type="button" class="ghost" data-all="0">Alle aus</button></div></div>` : ''}
+    ${devs.map(d => `<section class="dgroup"><div class="dg-head"><h2><a href="#/device/${esc(d.id)}">${esc(d.name)}</a></h2>${statusHtml(d)}</div>${fnItems(d)}</section>`).join('')}`;
+  bindFn(app, id => devs.find(d => d.id === id));
+  app.querySelectorAll('[data-all]').forEach(b => b.onclick = async () => {
+    const on = b.dataset.all === '1';
+    await Promise.all(lit.map(d => { d.config.light.on = on; return directSave(d.id, x => { x.light = { ...(x.light || {}), on }; }, 'light', lightPayload(d.config)); }));
+    toast(on ? 'Alle Lichter an' : 'Alle Lichter aus');
+    pageDirekt();
+  });
 }
 
 function tabAnzeigen() {
@@ -393,10 +445,11 @@ function tabAnzeigen() {
       <div class="row disp-foot"><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
     </details>`;
   }).join('');
-  const add = c.displays.length < 3
+  const maxD = boardOf(c).maxDisplays;
+  const add = c.displays.length < maxD
     ? `<button type="button" class="${c.displays.length ? 'ghost' : ''}" data-act="add">Anzeige hinzufügen</button>`
-    : '<p class="muted">Mehr als drei Anzeigen pro Gerät sind nicht möglich.</p>';
-  return (blocks || `<div class="panel empty" style="margin-bottom:16px"><h2>Noch keine Anzeige</h2><p class="muted">Füge die erste Anzeige hinzu und wähle, ob ein TFT oder eine Segmentanzeige angeschlossen ist.</p></div>`) + add;
+    : `<p class="muted">Dieses Board unterstützt höchstens ${maxD} Anzeigen.</p>`;
+  return warnHtml() + (blocks || `<div class="panel empty" style="margin-bottom:16px"><h2>Noch keine Anzeige</h2><p class="muted">Füge die erste Anzeige hinzu und wähle, ob ein TFT oder eine Segmentanzeige angeschlossen ist.</p></div>`) + add;
 }
 
 function tabAnsagen() {
@@ -415,11 +468,14 @@ function tabAnsagen() {
 }
 
 function tabLicht() {
-  const l = draft.config.light;
+  const l = draft.config.light; const dim = l.dimmable !== false;
   return `<section class="panel" style="max-width:560px"><div class="row sp" style="margin-bottom:14px"><label class="switch"><input type="checkbox" data-k="config.light.on" ${l.on ? 'checked' : ''}><span class="tr"></span><span class="tx">Licht an</span></label></div>
-    <label class="field"><span class="lbl">Helligkeit <b class="val">${l.brightness}%</b></span><input type="range" min="0" max="100" data-num data-k="config.light.brightness" value="${l.brightness}"></label>
+    ${dim ? `<label class="field"><span class="lbl">Helligkeit <b class="val">${l.brightness}%</b></span><input type="range" min="0" max="100" data-num data-k="config.light.brightness" value="${l.brightness}"></label>`
+      : '<p class="hint" style="margin-top:0">Dieses Licht ist nicht dimmbar. Du kannst das im Reiter Gerät ändern.</p>'}
     <p class="hint">Änderungen wirken sofort am Gerät. Zum dauerhaften Speichern der Einstellung unten auf Speichern tippen.</p></section>`;
 }
+
+const warnHtml = () => boardWarnings(draft.config).map(w => `<p class="callout warn">${esc(w)}</p>`).join('');
 
 function tabPins() {
   const sets = pinSets(draft.config).map(s => `<section class="pinset"><h3>${esc(s.title)}</h3><p class="muted">${esc(s.sub)}</p>
@@ -427,17 +483,22 @@ function tabPins() {
       ${s.rows.map(r => `<div class="pin"><span class="gpio ${r.pwr ? 'pwr' : ''}">${esc(r.gpio)}</span><span class="track"></span>
         <span class="mod"><b>${esc(r.mod)}</b>${r.alt || r.note ? `<small>${[r.alt, r.note].filter(Boolean).map(esc).join(', ')}</small>` : ''}</span></div>`).join('')}
     </div>${s.notes.map(n => `<p class="hint">${esc(n)}</p>`).join('')}</section>`).join('');
-  return `<div class="callout"><p><strong>${esc(BOARD.name)}</strong></p><p>${esc(BOARD.warning)}</p></div>${sets}`;
+  const B = boardOf(draft.config);
+  return `<div class="callout"><p><strong>${esc(B.name)}</strong></p><p>${esc(B.warning)}</p></div>${warnHtml()}${sets}`;
 }
 
 function tabGeraet() {
   return `<section class="panel" style="max-width:560px"><label class="field"><span class="lbl">Name des Geräts</span><input type="text" data-k="name" value="${esc(draft.name)}"></label>
+    <label class="field" style="margin-top:14px"><span class="lbl">Board</span>${sel('config.board', draft.config.board, Object.entries(BOARDS).map(([k, v]) => [k, v.name]), 'data-rerender')}</label>
+    <p class="hint">Bestimmt die Anschlussbelegung im Reiter Anschlüsse. Die Firmware muss zum Board passen.</p>
     <p class="hint">Geräte-ID: ${esc(draft.device_uid)}</p></section>
     <section class="section" style="margin-top:32px;max-width:560px"><h2>Funktionen</h2>
       <p class="muted">Schalte ab, was an diesem Gerät nicht verbaut ist. Die Funktion verschwindet aus der App und braucht keine Anschlüsse. Einstellungen bleiben erhalten.</p>
       <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder Segmentanzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
         <div class="fn"><div class="fn-main"><b>${t}</b><small>${s}</small></div>
-          <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>`).join('')}</div></section>
+          <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>${k === 'light' && feat('light') ? `
+        <div class="fn sub"><div class="fn-main"><b>Dimmbar</b><small>Nur einschalten, wenn das Licht stufenlos regelbar ist. Sonst gibt es nur An und Aus.</small></div>
+          <label class="switch"><input type="checkbox" data-k="config.light.dimmable" data-rerender aria-label="Licht dimmbar" ${draft.config.light.dimmable !== false ? 'checked' : ''}><span class="tr"></span></label></div>` : ''}`).join('')}</div></section>
     <section class="section" style="margin-top:32px;max-width:560px"><h2>Gerät entkoppeln</h2>
       <p class="muted">Das Gerät verschwindet aus deinem Konto und muss danach neu eingerichtet werden.</p>
       <button type="button" class="danger" data-act="del">Gerät entkoppeln</button></section>`;
@@ -468,39 +529,40 @@ async function fillPreviews() {
   }));
 }
 
-async function directSave(mutate, cmdType, payload) {
+async function directSave(devId, mutate, cmdType, payload) {
   try {
-    await Devices.patchConfig(draft.id, mutate);
-    if (cmdType) await Devices.command(draft.id, cmdType, payload);
+    await Devices.patchConfig(devId, mutate);
+    if (cmdType) await Devices.command(devId, cmdType, payload);
   } catch (e) { toast('Senden nicht möglich: ' + e.message); }
 }
 
-function bindDirect() {
-  const c = draft.config;
-  app.querySelectorAll('[data-d]').forEach(el => {
-    const d = el.dataset.d;
+// Bedienelemente der Funktionsliste. getDev liefert zum data-dev-Wert das Gerät samt Konfiguration.
+function bindFn(root, getDev) {
+  root.querySelectorAll('[data-d]').forEach(el => {
+    const dev = getDev(el.dataset.dev); if (!dev) return;
+    const c = dev.config; const d = el.dataset.d;
     if (el.type === 'range') el.addEventListener('input', () => { const b = el.closest('.field')?.querySelector('.val'); if (b) b.textContent = el.value + '%'; });
     if (d === 'light-on') el.onchange = () => {
       c.light.on = el.checked; const tx = el.closest('.switch').querySelector('.tx'); if (tx) tx.textContent = el.checked ? 'An' : 'Aus';
-      directSave(x => { x.light = { ...(x.light || {}), on: c.light.on }; }, 'light', c.light);
+      directSave(dev.id, x => { x.light = { ...(x.light || {}), on: c.light.on }; }, 'light', lightPayload(c));
     };
     else if (d === 'light-bri') el.onchange = () => {
       c.light.brightness = Number(el.value);
-      directSave(x => { x.light = { ...(x.light || {}), brightness: c.light.brightness }; }, 'light', c.light);
+      directSave(dev.id, x => { x.light = { ...(x.light || {}), brightness: c.light.brightness }; }, 'light', lightPayload(c));
     };
     else if (d === 'vol') el.onchange = () => {
       c.audio.volume = Number(el.value);
-      directSave(x => { x.audio = { ...(x.audio || {}), volume: c.audio.volume }; }, 'volume', { volume: c.audio.volume });
+      directSave(dev.id, x => { x.audio = { ...(x.audio || {}), volume: c.audio.volume }; }, 'volume', { volume: c.audio.volume });
     };
     else if (d === 'play') el.onclick = async () => {
       const r = c.audio.rules[Number(el.dataset.i)];
       try {
-        await Devices.command(draft.id, 'announce', { rule: r, volume: c.audio.volume });
-        if (DEMO) { await hearRule(r); toast('Demo: Die Ansage läuft in diesem Browser.'); } else toast('Ansage gesendet');
+        await Devices.command(dev.id, 'announce', { rule: r, volume: c.audio.volume });
+        if (DEMO) { mediaList = await Media.list(); await hearRule(r, c); toast('Demo: Die Ansage läuft in diesem Browser.'); } else toast('Ansage gesendet');
       } catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
     else if (d === 'refresh') el.onclick = async () => {
-      try { depCache.clear(); await Devices.command(draft.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
+      try { depCache.clear(); await Devices.command(dev.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
       catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
   });
@@ -509,7 +571,7 @@ function bindDirect() {
 let lightTimer;
 function sendLight() {
   clearTimeout(lightTimer);
-  lightTimer = setTimeout(() => Devices.command(draft.id, 'light', draft.config.light).catch(e => toast('Licht konnte nicht geschaltet werden: ' + e.message)), 300);
+  lightTimer = setTimeout(() => Devices.command(draft.id, 'light', lightPayload(draft.config)).catch(e => toast('Licht konnte nicht geschaltet werden: ' + e.message)), 300);
 }
 
 function bindDevice() {
@@ -518,7 +580,7 @@ function bindDevice() {
   app.querySelectorAll('details[data-slot]').forEach(d => d.addEventListener('toggle', () => {
     const s = Number(d.dataset.slot); d.open ? openDisp.add(s) : openDisp.delete(s);
   }));
-  bindDirect();
+  bindFn(app, () => draft);
 
   app.querySelectorAll('[data-k]').forEach(el => {
     const val = () => {
@@ -570,7 +632,7 @@ function bindDevice() {
     const rules = draft.config.audio.rules;
     if (a === 'add') {
       const used = draft.config.displays.map(d => d.slot);
-      const slot = [1, 2, 3].find(s => !used.includes(s));
+      const slot = [1, 2, 3].slice(0, boardOf(draft.config).maxDisplays).find(s => !used.includes(s));
       draft.config.displays.push(newDisplay(slot)); openDisp.add(slot); markDirty(); renderDevice();
     } else if (a === 'rm') {
       const slot = draft.config.displays[i].slot;
@@ -601,8 +663,8 @@ function bindDevice() {
       try { await Devices.save(draft); dirty = false; $('.savebar')?.classList.remove('changed'); toast('Gespeichert'); }
       catch (e) { toast('Speichern nicht möglich: ' + e.message); }
     } else if (a === 'del') {
-      if (confirm('Gerät wirklich entkoppeln? Es muss danach neu eingerichtet werden.')) {
-        try { await Devices.remove(draft.id); location.hash = '#/'; } catch (e) { toast('Entkoppeln nicht möglich: ' + e.message); }
+      if (await ask({ title: 'Gerät entkoppeln?', text: 'Das Gerät verschwindet aus deinem Konto und muss danach neu eingerichtet werden.', ok: 'Entkoppeln', danger: true })) {
+        try { await Devices.remove(draft.id); location.hash = '#/devices'; } catch (e) { toast('Entkoppeln nicht möglich: ' + e.message); }
       }
     }
   });
@@ -639,7 +701,7 @@ async function pageMedia() {
       <span class="nm">${esc(m.name)}</span><span class="muted">${m.kind === 'audio' ? 'MP3' : 'Bild'}, ${(m.size / 1024).toFixed(0)} KB</span>
       <button type="button" class="danger small">Löschen</button>`;
     el.querySelector('button').onclick = async () => {
-      if (confirm('Datei löschen? Ansagen und Anzeigen, die sie nutzen, brauchen danach eine neue Datei.')) { await Media.remove(m); pageMedia(); }
+      if (await ask({ title: 'Datei löschen?', text: 'Ansagen und Anzeigen, die diese Datei nutzen, brauchen danach eine neue Datei.', ok: 'Löschen', danger: true })) { await Media.remove(m); pageMedia(); }
     };
     grid.appendChild(el);
   }
@@ -668,7 +730,9 @@ async function pageInstaller() {
       <ol class="steps"><li><div>ESP32 per USB mit dem Computer verbinden.</div></li><li><div>Auf Firmware installieren klicken und den Anschluss wählen.</div></li><li><div>Danach das Gerät hinzufügen und mit dem Kopplungscode verbinden.</div></li></ol>
       <div style="margin-top:12px"><esp-web-install-button manifest="install/manifest.json"><button slot="activate" type="button">Firmware installieren</button><span slot="unsupported" class="muted">Dieser Browser kann keine USB-Geräte ansprechen. Nutze Chrome oder Edge an einem Computer.</span><span slot="not-allowed" class="muted">Der Zugriff auf USB-Geräte braucht eine HTTPS-Verbindung.</span></esp-web-install-button></div>
     </div>
-    <div class="callout" style="margin-top:20px;max-width:640px"><p>Die Firmware-Datei <strong>install/firmware.bin</strong> gibt es noch nicht. Sie entsteht mit der Firmware und wird danach in diesen Ordner gelegt.</p></div>`;
+    <div class="callout warn" style="margin-top:20px;max-width:640px"><p><strong>Welcher ESP32?</strong> Der Installer erkennt den Chip selbst und spielt die passende Firmware auf. Unterstützt sind der ESP32-S3 (empfohlen) und der normale ESP32, zum Beispiel WROOM-32.</p>
+      <p>Ein normaler ESP32 hat weniger Pins und weniger Rechenleistung. Mit mehr als einer Anzeige kann die Darstellung ruckeln, besonders zusammen mit Ansagen. Mehr als zwei Anzeigen sind damit nicht möglich. Wähle danach am Gerät im Reiter Gerät das passende Board.</p></div>
+    <div class="callout" style="margin-top:12px;max-width:640px"><p>Die Firmware-Dateien <strong>install/firmware.bin</strong> (ESP32-S3) und <strong>install/firmware-esp32.bin</strong> (ESP32) gibt es noch nicht. Sie entstehen mit der Firmware und werden danach in diesen Ordner gelegt.</p></div>`;
   if (!customElements.get('esp-web-install-button')) {
     try { await import('https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module'); }
     catch { toast('Die Installer-Bibliothek konnte nicht geladen werden.'); }

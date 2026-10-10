@@ -13,9 +13,10 @@ const objectUrls = new Map(); // Demo: MP3-Vorschau nur für die laufende Sitzun
 
 export const defaultConfig = () => ({
   // Verbaute Funktionen. Fehlt der Eintrag (ältere Geräte), gilt die Funktion als vorhanden.
+  board: 'esp32s3',
   features: { displays: true, light: true, audio: true },
   displays: [],
-  light: { on: false, brightness: 100 },
+  light: { on: false, brightness: 100, dimmable: true },
   audio: { volume: 60, rules: [] },
 });
 
@@ -228,6 +229,7 @@ function rrDemoApply(type, p) {
     case 'sw_set': if (p.id in s.sw) s.sw[p.id] = p.state === 'flip' ? (s.sw[p.id] === 'straight' ? 'turnout' : 'straight') : p.state; break;
     case 'st_set': s.st[p.id] = 'locked'; setTimeout(() => { s.st[p.id] = 'free'; rrNotify(); }, 2500); break;
     case 'co_set': s.co[p.id] = !!p.on; break;
+    case 'plan_reload': break;
     default: break;
   }
 }
