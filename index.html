@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f8f9">
+  <title>Pro4Rail</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="favicon-48.png" type="image/png" sizes="48x48">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <script>
+    // Design vor dem ersten Zeichnen setzen, damit nichts aufblitzt.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('p4r_theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      var m = document.querySelector('meta[name=theme-color]');
+      if (m) m.content = t === 'dark' ? '#1d2631' : '#f6f8f9';
+    })();
+  </script>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="bar">
+    <!-- Logo: logo-light.png (dunkle Schrift) gehört zum hellen, logo-dark.png (weiße Schrift) zum dunklen Design -->
+    <a class="logo" href="#/" aria-label="Pro4Rail Startseite">
+      <img class="for-light" src="assets/logo-light.png" alt="Pro4Rail">
+      <img class="for-dark" src="assets/logo-dark.png" alt="">
+    </a>
+    <nav id="nav" aria-label="Hauptnavigation">
+      <a href="#/" data-r="">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+        Geräte
+      </a>
+      <a href="#/media" data-r="media">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 8v8M20 11v2"/></svg>
+        Medien
+      </a>
+      <a href="#/installer" data-r="installer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M10 7V3M14 7V3M10 21v-4M14 21v-4M7 10H3M7 14H3M21 10h-4M21 14h-4"/></svg>
+        Installer
+      </a>
+      <a href="#/account" data-r="account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>
+        Konto
+      </a>
+    </nav>
+    <button class="themebtn ghost" id="themebtn" type="button" aria-label="Zwischen hellem und dunklem Design wechseln" title="Design wechseln">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+    </button>
+  </div>
+  <div id="banner"></div>
+  <main id="app"></main>
+  <footer class="foot">
+    <span>© <span id="year">2026</span> H-IT Solutions. Alle Rechte vorbehalten.</span>
+    <span>Pro4Rail</span>
+  </footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
