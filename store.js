@@ -91,7 +91,7 @@ export const Devices = {
   },
   // Einmaliger 6-stelliger Code, 15 Minuten gültig. Gerät löst ihn über die Edge Function "claim-device" ein.
   async createPairingCode() {
-    const code = String(Math.floor(Math.random() * 900000) + 100000);
+    const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 90000000 + 10000000); // 8 Ziffern
     const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     if (DEMO) { LS.set('demo_code', { code, expires }); return { code, expires }; }
     const { error } = await sb.from('pairing_codes').insert({ code, expires_at: expires });

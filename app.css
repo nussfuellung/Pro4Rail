@@ -203,7 +203,7 @@ button:disabled{opacity:.5;cursor:default}
 .steps li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:12px;padding:10px 0;align-items:start}
 .steps li+li{border-top:1px solid var(--line)}
 .steps li::before{content:counter(s);width:30px;height:30px;display:grid;place-items:center;background:var(--brand);color:var(--on-brand);border-radius:3px;font:700 18px/1 var(--cond)}
-.code{font:700 52px/1 var(--cond);letter-spacing:10px;color:var(--ink);padding:16px 20px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);display:inline-block}
+.code{font:700 clamp(34px,10vw,52px)/1 var(--cond);letter-spacing:.14em;color:var(--ink);padding:16px 20px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);display:inline-block}
 
 /* ---------- Fußzeile und Hinweise ---------- */
 .foot{padding:18px 24px;padding-bottom:calc(18px + var(--navh) + env(safe-area-inset-bottom));border-top:1px solid var(--line);color:var(--ink2);font-size:14px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -317,5 +317,24 @@ button.danger.solid:hover{background:var(--bad);color:#fff;filter:brightness(1.0
   .desktop-only{display:none!important}
   .desktop-hint{display:block}
 }
+
+/* ---------- TFT-Vorschau (Maße in Display-Pixeln, wird per Skalierung eingepasst) ---------- */
+.tftwrap{position:relative;max-width:100%;border-radius:4px;box-shadow:0 0 0 4px #14181f,0 6px 18px rgba(0,0,0,.28);overflow:hidden;margin:4px 0 8px}
+.tft{position:absolute;left:0;top:0;transform-origin:0 0;font-family:"Barlow",system-ui,sans-serif;line-height:1.1;overflow:hidden;font-variant-numeric:tabular-nums}
+.tft b{font-weight:700}
+.tft i{font-style:normal;font-weight:600}
+.tft-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 10px;border-bottom:2px solid #fff}
+.tft-head .tft-st{flex:1;min-width:0;text-align:center;opacity:.85;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tft-row{display:flex;align-items:stretch;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.25)}
+.tft-row .c{display:flex;flex-direction:column;justify-content:center;min-width:0;padding-right:6px}
+.tft-row .c.grow{flex:1}
+.tft-row .c.r{align-items:flex-end;padding-right:0}
+.tft-row .dest{font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tft-none,.tft-clock,.tft-date{text-align:center}
+.tft-none{padding-top:40px;opacity:.8}
+.tft-clock{font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;padding-top:44px;line-height:1}
+.tft-date{opacity:.8;margin-top:6px}
+dialog.dlg.wide{width:min(720px,calc(100vw - 24px))}
+.pv{margin:6px 0 14px}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

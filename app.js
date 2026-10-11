@@ -1,6 +1,8 @@
 import { CONFIG } from './config.js';
 import { DEMO, initStore, Auth, Devices, Media, defaultConfig, uid } from './store.js';
 import { pinSets, BOARDS, boardOf, boardWarnings } from './pins.js';
+import { searchStations, getDepartures, clearDepartureCache } from './transport.js';
+import { TFT_MODELS, screenSize, departureScreen, clockScreen, imageScreen } from './tft.js';
 import { pageRocrail } from './rocrail.js';
 
 const $ = s => document.querySelector(s);
@@ -69,11 +71,6 @@ function toggleTheme() {
   if (m) m.content = next === 'dark' ? '#1d2631' : '#f6f8f9';
 }
 
-const TFT_MODELS = {
-  ST7789: { label: 'ST7789 (240×320)', w: 240, h: 320 },
-  ILI9341: { label: 'ILI9341 (240×320)', w: 240, h: 320 },
-  ST7735: { label: 'ST7735 (128×160)', w: 128, h: 160 },
-};
 const SEG_KINDS = { '7seg': '7-Segment', '14seg': '14-Segment', '16seg': '16-Segment' };
 const SEG_DRIVERS = { TM1637: 'TM1637 (4 oder 6 Stellen)', MAX7219: 'MAX7219 (bis 8 Stellen)', HT16K33: 'HT16K33 (I²C, 4 Stellen)' };
 const CONTENT = {
@@ -84,48 +81,47 @@ const DAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 const DAY_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
 const newDisplay = slot => ({
-  slot, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320 },
+  slot, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320, landscape: true },
   seg: { kind: '7seg', driver: 'TM1637', digits: 4 },
   content: 'abfahrt', station: null, rows: 2, filter: '', imageId: null,
 });
 
 // ---------- Fahrplandaten (Vorschau direkt aus der PWA) ----------
-const depCache = new Map();
-async function searchStations(q) {
-  const r = await fetch(`${CONFIG.TRANSPORT_API}/locations?query=${encodeURIComponent(q)}&results=6&stops=true&addresses=false&poi=false`);
-  if (!r.ok) throw new Error('Suche fehlgeschlagen');
-  return (await r.json()).filter(x => x.id && x.name);
-}
-async function getDepartures(stationId) {
-  const hit = depCache.get(stationId);
-  if (hit && Date.now() - hit.t < 30000) return hit.data;
-  const r = await fetch(`${CONFIG.TRANSPORT_API}/stops/${encodeURIComponent(stationId)}/departures?duration=120&results=12`);
-  if (!r.ok) throw new Error('Abfahrten nicht abrufbar');
-  const j = await r.json();
-  const list = Array.isArray(j) ? j : (j.departures || []);
-  const data = list.map(d => ({
-    line: d.line?.name || '?', dir: d.direction || '', when: d.when || d.plannedWhen, planned: d.plannedWhen,
-    delay: d.delay == null ? null : Math.round(d.delay / 60), platform: d.platform || d.plannedPlatform || '', cancelled: !!d.cancelled,
-  }));
-  depCache.set(stationId, { t: Date.now(), data });
-  return data;
-}
 function applyFilter(list, filter) {
   const f = (filter || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   return f.length ? list.filter(d => f.some(x => d.line.toLowerCase().includes(x))) : list;
 }
 
+// Rahmen für eine TFT-Darstellung. Die Skalierung auf die Breite des Fensters macht fitScreens().
+const tftBox = scr => `<div class="tftwrap" data-w="${scr.w}" data-h="${scr.h}">${scr.html}</div><p class="hint">Genau so erscheint es auf dem Display (${scr.w}×${scr.h} Pixel).</p>`;
+function fitScreens(root) {
+  root.querySelectorAll('.tftwrap').forEach(wrapEl => {
+    const w = Number(wrapEl.dataset.w), h = Number(wrapEl.dataset.h);
+    const avail = wrapEl.parentElement?.clientWidth; if (!avail) return;
+    const sc = Math.max(.5, Math.min(avail / w, 2.2));
+    const inner = wrapEl.firstElementChild;
+    inner.style.transform = `scale(${sc})`;
+    wrapEl.style.width = Math.round(w * sc) + 'px'; wrapEl.style.height = Math.round(h * sc) + 'px';
+  });
+}
+window.addEventListener('resize', debounce(() => fitScreens(document), 120));
+
 async function previewHtml(disp) {
   const isSeg = disp.type === 'seg';
   const note = t => `<p class="hint">${t}</p>`;
   if (disp.content === 'uhr') {
+    if (!isSeg) return tftBox(clockScreen({ tft: disp.tft }));
     const t = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    return isSeg ? `<div class="seg">${t}<small>Uhr</small></div>` : `<div class="board"><div class="bh"><span>Uhr</span></div><div style="font-size:46px;font-weight:700">${t}</div></div>`;
+    return `<div class="seg">${t}<small>Uhr</small></div>`;
   }
-  if (disp.content === 'bild') return note('Das gewählte Bild erscheint auf dem Display.');
+  if (disp.content === 'bild') {
+    const item = mediaList.find(m => m.id === disp.imageId);
+    const url = item ? await Media.url(item) : null;
+    return url ? tftBox(imageScreen({ tft: disp.tft, url })) : note('Wähle ein Bild bei den Medien. Hier erscheint es dann so, wie es auf dem Display aussieht.');
+  }
   if (!disp.station) return note('Wähle einen Bahnhof, dann erscheint hier die Live-Vorschau.');
   try {
-    const list = applyFilter(await getDepartures(disp.station.id), disp.filter);
+    const list = applyFilter(await getDepartures(disp.station), disp.filter);
     if (!list.length) return note('Keine Abfahrten gefunden. Prüfe den Linienfilter.');
     if (isSeg) {
       const n = list[0]; const digits = disp.seg.digits || 4;
@@ -137,14 +133,23 @@ async function previewHtml(disp) {
       const shown = txt.slice(-digits).padStart(digits, ' ').replace(/ /g, '&nbsp;');
       return `<div class="seg">${shown}<small>${cap}, ${esc(n.line)} nach ${esc(n.dir)}</small></div>`;
     }
-    const rows = list.slice(0, disp.rows || 2).map(d => {
-      const late = d.cancelled ? '<span class="late">fällt aus</span>' : d.delay > 0 ? `<span class="late">+${d.delay}</span>` : '<span class="okk">pünktlich</span>';
-      return `<div class="br"><span>${esc(d.line)}</span><span>${esc(d.dir)}</span><span>${hhmm(d.planned || d.when)}${late}</span></div>`;
-    }).join('');
-    return `<div class="board"><div class="bh"><span>${esc(disp.station.name)}</span><span>Abfahrt</span></div>${rows}</div>`;
+    return tftBox(departureScreen({ tft: disp.tft, rows: disp.rows || 2, stationName: disp.station.name, deps: list }));
   } catch (e) {
     return note(`Vorschau nicht verfügbar: ${esc(e.message)}.`);
   }
+}
+
+// Große Vorschau in einem Fenster, aktualisiert sich selbst.
+async function showPreview(disp) {
+  const d = document.createElement('dialog'); d.className = 'dlg wide';
+  d.innerHTML = `<form method="dialog"><h2>Vorschau Anzeige ${disp.slot}</h2><div id="pv" class="pv"><p class="hint">Lädt …</p></div>
+    <div class="dlg-btns"><button value="x">Schließen</button></div></form>`;
+  document.body.appendChild(d);
+  const draw = async () => { const el = d.querySelector('#pv'); if (!el) return; el.innerHTML = await previewHtml(disp); fitScreens(d); };
+  d.addEventListener('close', () => { clearInterval(timer); d.remove(); });
+  d.addEventListener('click', e => { if (e.target === d) d.close(); });
+  d.showModal(); await draw();
+  const timer = setInterval(draw, 20000);
 }
 
 // ---------- Router ----------
@@ -433,7 +438,8 @@ function tabAnzeigen() {
           <label class="field"><span class="lbl">Segmente</span>${sel(`${p}.seg.kind`, d.seg.kind, Object.entries(SEG_KINDS), 'data-rerender')}</label>
           <label class="field"><span class="lbl">Treiber-Chip</span>${sel(`${p}.seg.driver`, d.seg.driver, Object.entries(SEG_DRIVERS), 'data-rerender')}</label>
           <label class="field"><span class="lbl">Anzahl Stellen</span><input type="number" min="1" max="8" data-num data-rerender data-k="${p}.seg.digits" value="${d.seg.digits}"></label>` : `
-          <label class="field"><span class="lbl">Modell</span>${sel(`${p}.tft.model`, d.tft.model, Object.entries(TFT_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>`}
+          <label class="field"><span class="lbl">Modell</span>${sel(`${p}.tft.model`, d.tft.model, Object.entries(TFT_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
+          <label class="field"><span class="lbl">Ausrichtung</span>${sel(`${p}.tft.landscape`, String(d.tft.landscape !== false), [['true', 'Querformat (wie eine Bahnhofstafel)'], ['false', 'Hochformat']], 'data-bool data-rerender')}</label>`}
         <label class="field"><span class="lbl">Inhalt</span>${sel(`${p}.content`, d.content, Object.entries(CONTENT[d.type]), 'data-rerender')}</label>
         ${!isSeg && d.content === 'abfahrt' ? `<label class="field"><span class="lbl">Zeilen</span>${sel(`${p}.rows`, d.rows, [1, 2, 3, 4].map(n => [n, n]), 'data-num data-rerender')}</label>` : ''}
         ${needsStation ? `<label class="field"><span class="lbl">Nur diese Linien (zum Beispiel RE5, S1)</span><input type="text" data-rerender data-k="${p}.filter" value="${esc(d.filter)}"></label>` : ''}
@@ -442,7 +448,7 @@ function tabAnzeigen() {
       ${needsStation ? `<div style="margin-top:14px"><label class="field"><span class="lbl">Bahnhof${d.station ? `: <strong style="color:var(--ink)">${esc(d.station.name)}</strong>` : ''}</span>
         <input type="text" placeholder="Bahnhof suchen" data-search="${i}" autocomplete="off"></label><div class="res" id="res${i}" hidden></div></div>` : ''}
       <div class="prev" data-prev="${i}"><p class="hint">Vorschau wird geladen</p></div>
-      <div class="row disp-foot"><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
+      <div class="row disp-foot"><button type="button" class="small" data-act="bigprev" data-i="${i}">Vorschau</button><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
     </details>`;
   }).join('');
   const maxD = boardOf(c).maxDisplays;
@@ -525,7 +531,7 @@ async function fillPreviews() {
     const d = draft.config.displays[Number(el.dataset.prev)];
     if (!d) return;
     const html = await previewHtml(d);
-    if (app.contains(el)) el.innerHTML = html;
+    if (app.contains(el)) { el.innerHTML = html; fitScreens(el); }
   }));
 }
 
@@ -562,7 +568,7 @@ function bindFn(root, getDev) {
       } catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
     else if (d === 'refresh') el.onclick = async () => {
-      try { depCache.clear(); await Devices.command(dev.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
+      try { clearDepartureCache(); await Devices.command(dev.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
       catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
   });
@@ -579,6 +585,7 @@ function bindDevice() {
 
   app.querySelectorAll('details[data-slot]').forEach(d => d.addEventListener('toggle', () => {
     const s = Number(d.dataset.slot); d.open ? openDisp.add(s) : openDisp.delete(s);
+    if (d.open) fitScreens(d);
   }));
   bindFn(app, () => draft);
 
@@ -586,6 +593,7 @@ function bindDevice() {
     const val = () => {
       let v = el.type === 'checkbox' ? el.checked : el.value;
       if (el.hasAttribute('data-num')) v = Number(v);
+      if (el.hasAttribute('data-bool')) v = v === 'true';
       return v;
     };
     if (el.type === 'range') {
@@ -639,6 +647,8 @@ function bindDevice() {
       draft.config.displays.splice(i, 1);
       rules.forEach(r => { if (r.slot === slot) r.slot = 0; });
       markDirty(); renderDevice();
+    } else if (a === 'bigprev') {
+      await showPreview(draft.config.displays[i]);
     } else if (a === 'topins') {
       tab = 'pins'; renderDevice(); window.scrollTo(0, 0);
     } else if (a === 'addrule') {
@@ -742,6 +752,7 @@ async function pageInstaller() {
 // ---------- Start ----------
 (async () => {
   $('#year').textContent = new Date().getFullYear();
+  if (CONFIG.DATA_SOURCE === 'transitous') $('#src').innerHTML = 'Fahrplandaten: <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous</a> ·';
   $('#themebtn').onclick = toggleTheme;
   await initStore();
   Auth.onChange(route);

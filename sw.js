@@ -1,6 +1,6 @@
-const CACHE = 'pro4rail-shell-v6';
+const CACHE = 'pro4rail-shell-v9';
 const SHELL = [
-  './', 'index.html', 'app.css', 'app.js', 'store.js', 'pins.js', 'rocrail.js', 'config.js',
+  './', 'index.html', 'app.css', 'app.js', 'store.js', 'pins.js', 'rocrail.js', 'transport.js', 'tft.js', 'config.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'apple-touch-icon.png', 'favicon-48.png',
   'assets/logo-light.png', 'assets/logo-dark.png',
@@ -29,7 +29,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   const url = new URL(req.url);
-  // Nur eigene Dateien cachen. API-Aufrufe (Supabase, transport.rest, CDN) gehen immer direkt ins Netz.
+  // Nur eigene Dateien cachen. API-Aufrufe (Supabase, Fahrplan-API, CDN) gehen immer direkt ins Netz.
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   // Network-first, damit Updates sofort ankommen; Cache nur als Offline-Fallback.
   e.respondWith(
