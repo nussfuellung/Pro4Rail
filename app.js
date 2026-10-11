@@ -368,7 +368,7 @@ async function pageAdd() {
     <ol class="steps">
       <li><div><h3>Firmware installieren</h3><p class="muted" style="margin:2px 0 8px">Nur bei einem neuen ESP32 ohne Pro4Rail-Firmware nötig. Der Installer arbeitet per USB am Computer.</p><a class="btn ghost small desktop-only" href="#/installer">Zum Installer</a><p class="muted desktop-hint">Der Installer funktioniert nur am Computer mit Chrome oder Edge.</p></div></li>
       <li><div><h3>Kopplungscode erzeugen</h3><p class="muted" style="margin:2px 0 8px">Der Code gilt 15 Minuten und nur für ein Gerät.</p><button id="gen" class="small">Code erzeugen</button><div id="codebox" style="margin-top:14px"></div></div></li>
-      <li><div><h3>Mit dem WLAN des Geräts verbinden</h3><p class="muted" style="margin:2px 0 0">Der ESP32 öffnet nach dem Einschalten ein WLAN mit dem Namen Tafel und vier Zeichen dahinter. Verbinde dein Handy damit. Das Einrichtungsfenster öffnet sich von selbst, sonst rufst du <strong>192.168.4.1</strong> im Browser auf.</p></div></li>
+      <li><div><h3>Mit dem WLAN des Geräts verbinden</h3><p class="muted" style="margin:2px 0 0">Der ESP32 öffnet nach dem Einschalten ein WLAN mit dem Namen Rail4Pro und vier Zeichen dahinter. Verbinde dein Handy damit. Das Einrichtungsfenster öffnet sich von selbst, sonst rufst du <strong>192.168.4.1</strong> im Browser auf.</p></div></li>
       <li><div><h3>WLAN und Code eingeben</h3><p class="muted" style="margin:2px 0 0">Wähle dein Heimnetz, gib das Passwort und den Kopplungscode ein und speichere. Danach erscheint das Gerät in deiner Liste.</p></div></li>
     </ol>
   </div>
@@ -428,7 +428,7 @@ function ruleHtml(r, i) {
     fields = `<div class="grid"><label class="field"><span class="lbl">Bahnhof und Anzeige</span>${slotSel}</label>
       <label class="field"><span class="lbl">Ab wie vielen Minuten Verspätung</span><input type="number" min="1" max="120" data-num data-k="${p}.minDelay" data-rerender value="${r.minDelay}"></label></div>`;
   }
-  const soundOpts = [['', 'MP3 wählen …'], ['auto', 'Automatische Ansage mit Zug, Ziel und Gleis'], ...audios.map(m => [m.id, m.name])];
+  const soundOpts = [['', 'MP3 wählen …'], ['auto', 'Gong (Sprachansage folgt später)'], ...audios.map(m => [m.id, m.name])];
   const known = soundOpts.some(([v]) => v === r.mediaId);
   return `<div class="panel rule ${r.enabled ? '' : 'off'}">
     <div class="rule-head">
@@ -454,13 +454,15 @@ async function hearRule(r, cfg = draft?.config) {
   if (player) { player.pause(); player = null; }
   speechSynthesis?.cancel?.();
   if (!r.mediaId) { toast('Wähle zuerst eine MP3 oder die automatische Ansage.'); return false; }
-  if (r.mediaId === 'auto') {
-    const text = r.trigger === 'verspaetung' ? 'Der RE 5 nach Koblenz, Gleis 3, ca. 5 Minuten später.'
-      : r.trigger === 'abfahrt' ? 'Der RE 5 nach Koblenz, Gleis 3, fährt in 2 Minuten ab.'
-      : 'Hinweis: Dies ist eine Ansage nach Zeitplan.';
-    if (!('speechSynthesis' in window)) { toast('Dieser Browser kann die Beispielansage nicht sprechen.'); return false; }
-    const u = new SpeechSynthesisUtterance(text); u.lang = 'de-DE'; u.volume = cfg.audio.volume / 100;
-    speechSynthesis.speak(u); return true;
+  if (r.mediaId === 'auto') {   // wie auf dem Gerät: zwei Töne als Gong, noch keine gesprochene Ansage
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)(); let t = ac.currentTime;
+      for (const [f, d] of [[880, .25], [659, .4]]) {
+        const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; o.connect(g); g.connect(ac.destination);
+        g.gain.setValueAtTime(.35 * cfg.audio.volume / 100, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.start(t); o.stop(t + d); t += d * .9;
+      }
+      return true;
+    } catch { toast('Dieser Browser kann den Gong nicht abspielen.'); return false; }
   }
   const item = mediaList.find(m => m.id === r.mediaId);
   const url = item ? await Media.url(item) : null;

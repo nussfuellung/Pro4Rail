@@ -46,7 +46,7 @@ static bool resolve(Entry& e, const std::string& id) {
 }
 
 static bool fetch(const std::string& stopId, int n, DepList& out) {
-  String url = String(P4R_TRANSITOUS) + "/api/v6/stoptimes?stopId=" + urlEnc(stopId) + "&n=" + n;
+  String url = String(P4R_TRANSITOUS) + "/api/v6/stoptimes?stopId=" + urlEnc(stopId) + "&n=" + n + "&fetchStops=true";
   JsonDocument filter;
   JsonObject f = filter["stopTimes"][0].to<JsonObject>();
   f["place"]["scheduledDeparture"] = true; f["place"]["departure"] = true; f["place"]["track"] = true; f["place"]["scheduledTrack"] = true;

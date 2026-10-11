@@ -1,4 +1,4 @@
-const CACHE = 'pro4rail-shell-v15';
+const CACHE = 'pro4rail-shell-v17';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'store.js', 'pins.js', 'rocrail.js', 'transport.js', 'tft.js', 'oled.js', 'marquee.js', 'config.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',

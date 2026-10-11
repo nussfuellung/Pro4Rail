@@ -78,7 +78,7 @@ export async function getDepartures(station, f = fetch, n = 15) {
     data = fromDbRest(await getJson(`${base()}/stops/${encodeURIComponent(station.id)}/departures?duration=${n > 15 ? 240 : 120}&results=${n > 15 ? 80 : 12}`, f));
   } else {
     const id = await transitousId(station, f);
-    data = fromTransitous(await getJson(`${base()}${CONFIG.STOPTIMES_PATH}?stopId=${encodeURIComponent(id)}&n=${n}`, f));
+    data = fromTransitous(await getJson(`${base()}${CONFIG.STOPTIMES_PATH}?stopId=${encodeURIComponent(id)}&n=${n}&fetchStops=true`, f));
   }
   cache.set(key, { t: Date.now(), data });
   return data;

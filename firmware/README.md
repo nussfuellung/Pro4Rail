@@ -26,7 +26,7 @@ Voraussetzung: PlatformIO. Einmalig `./tools/fetch-libs.sh` (lädt die Bibliothe
 `portal.cpp` (Einrichtung) · `media.cpp` (Zwischenspeicher) · `audio.cpp` · `light.cpp`.
 
 ## Bekannte Grenzen
-- Sprachausgabe fehlt: „Automatische Ansage“ spielt einen Gong statt gesprochenen Text. MP3-Ansagen funktionieren.
+- Sprachausgabe fehlt: Die Auswahl „Gong“ (früher „Automatische Ansage“) spielt einen Gong statt gesprochenen Text. MP3-Ansagen funktionieren.
 - Bilder: JPEG und GIF. GIFs mit Transparenz und „Hintergrund wiederherstellen“ können Reste zeigen. Ein normaler ESP32 hat im Flash nur etwa 1,5 MB für Bilder und MP3.
 - Licht: Relais (An und Aus, auch mit LOW-Trigger) oder MOSFET (PWM). Kein WS2812.
 - TFT: Ausrichtung und Farben hängen vom Modul ab. ST7735 ist für das häufige „Black Tab“-Modul eingestellt.
