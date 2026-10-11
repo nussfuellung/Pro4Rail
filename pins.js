@@ -1,6 +1,7 @@
 // Pinbelegung je Board (ESP32-S3 und ESP32 WROOM).
 // Diese Tabelle und die Firmware (config.h) müssen übereinstimmen. Änderungen immer an beiden Stellen machen.
 
+import { OLED_MODELS } from './oled.js';
 
 export const BOARDS = {
   esp32s3: {
@@ -9,7 +10,6 @@ export const BOARDS = {
     maxDisplays: 3,
     tftBus: { sck: 12, mosi: 11, dc: 9, rst: 8, bl: 4 },
     tftCs: { 1: 10, 2: 14, 3: 15 },
-    seg: { 1: [16, 17, 18], 2: [21, 38, 39], 3: [40, 41, 42] },
     i2c: { sda: 1, scl: 2 },
     audio: { bclk: 5, lrc: 6, din: 13 },
     light: 7,
@@ -20,20 +20,19 @@ export const BOARDS = {
     maxDisplays: 2,
     tftBus: { sck: 18, mosi: 23, dc: 19, rst: 4, bl: 32 },
     tftCs: { 1: 5, 2: 27 },
-    seg: { 1: [5, 16, 17], 2: [27, 14, 15] },
     i2c: { sda: 21, scl: 22 },
     audio: { bclk: 26, lrc: 25, din: 33 },
     light: 13,
   },
 };
 export const boardOf = config => BOARDS[config.board] || BOARDS.esp32s3;
-const HT16K33_ADDR = { 1: '0x70', 2: '0x71', 3: '0x72' };
-const HT16K33_BRIDGE = { 1: 'keine Lötbrücke', 2: 'Brücke A0', 3: 'Brücke A1' };
+const OLED_ADDR = ['0x3C', '0x3D'];   // Mehr Adressen haben die üblichen OLED-Module nicht, also höchstens zwei am gleichen Bus
 
 // Hinweise, die zur Auswahl passen (Leistung, zu viele Anzeigen).
 export function boardWarnings(config) {
   const b = boardOf(config); const n = (config.features?.displays === false ? [] : config.displays || []).length;
   const w = [];
+  if ((config.features?.displays === false ? [] : config.displays || []).filter(d => d.type === 'oled').length > OLED_ADDR.length) w.push('Am I²C-Bus sind höchstens zwei OLED-Anzeigen möglich, weil die Module nur die Adressen 0x3C und 0x3D kennen.');
   if (n > b.maxDisplays) w.push(`Dieses Board schafft höchstens ${b.maxDisplays} Anzeigen. Entferne eine Anzeige oder wähle ein ESP32-S3-Board.`);
   else if (config.board === 'esp32' && n >= 2) w.push('Mit zwei Anzeigen ist ein normaler ESP32 schnell am Limit. Bild und Abfahrtstafel können ruckeln, besonders zusammen mit Ansagen. Ein ESP32-S3 hat hier deutlich mehr Reserven.');
   if (config.board === 'esp32' && config.features?.audio !== false && n >= 1) w.push('Ansagen und Anzeigen gleichzeitig belasten einen normalen ESP32 stark. Spiele Ansagen am besten nur ab, während sich die Anzeigen kaum ändern.');
@@ -61,32 +60,24 @@ function tftSet(d, B) {
   };
 }
 
-function segSet(d, B) {
-  const [a, b, c] = B.seg[d.slot];
-  const kind = { '7seg': '7-Segment', '14seg': '14-Segment', '16seg': '16-Segment' }[d.seg.kind] || 'Segment';
-  const title = `Anzeige ${d.slot}: ${kind} mit ${d.seg.driver}`;
-  if (d.seg.driver === 'TM1637') {
-    return { title, sub: 'Zwei Datenleitungen, keine gemeinsamen Pins mit anderen Anzeigen.',
-      rows: [pwr('5V', 'VCC', 'viele Module laufen auch mit 3V3', ''), pwr('GND', 'GND', '', ''), io(a, 'CLK', '', ''), io(b, 'DIO', '', '')],
-      notes: [] };
-  }
-  if (d.seg.driver === 'MAX7219') {
-    return { title, sub: 'Drei Datenleitungen, keine gemeinsamen Pins mit anderen Anzeigen.',
-      rows: [pwr('5V', 'VCC', '', ''), pwr('GND', 'GND', '', ''), io(a, 'DIN', '', ''), io(b, 'CLK', '', ''), io(c, 'CS', 'auch LOAD', '')],
-      notes: ['Das Datenblatt verlangt bei 5 V Versorgung mindestens 3,5 V für ein High-Signal. Ein Pegelwandler von 3,3 V auf 5 V ist sicherer.'] };
-  }
-  return { title, sub: 'I²C-Bus, gemeinsam mit allen anderen HT16K33-Anzeigen. Jede Anzeige braucht eine eigene Adresse.',
-    rows: [pwr('3V3', 'VCC', 'je nach Modul auch 5V', ''), pwr('GND', 'GND', '', ''), io(B.i2c.sda, 'SDA', '', 'gemeinsam'), io(B.i2c.scl, 'SCL', '', 'gemeinsam')],
-    notes: [`Adresse ${HT16K33_ADDR[d.slot]} einstellen: ${HT16K33_BRIDGE[d.slot]} auf dem Modul.`] };
+function oledSet(d, B, idx) {
+  const m = OLED_MODELS[d.oled?.model] || OLED_MODELS.SSD1306_32;
+  const title = `Anzeige ${d.slot}: OLED ${m.ctrl} (${m.w}×${m.h})`;
+  const note = idx === 0 ? `Adresse ${OLED_ADDR[0]}. Das ist die Werkseinstellung der meisten Module.`
+    : idx === 1 ? `Adresse ${OLED_ADDR[1]}: Auf dem Modul die Adressbrücke umlöten (oft mit ADDR oder SA0 beschriftet), sonst stören sich die beiden Anzeigen.`
+    : 'Eine dritte OLED-Anzeige ist am gleichen Bus nicht möglich, es gibt nur zwei Adressen.';
+  return { title, sub: 'Zwei Leitungen (I²C), gemeinsam mit allen anderen I²C-Modulen. Jede Anzeige braucht eine eigene Adresse.',
+    rows: [pwr('3V3', 'VCC', 'die meisten Module vertragen auch 5V', ''), pwr('GND', 'GND', '', ''), io(B.i2c.sda, 'SDA', '', 'gemeinsam'), io(B.i2c.scl, 'SCL', 'auch SCK', 'gemeinsam')],
+    notes: [note] };
 }
 
 export function pinSets(config) {
-  const B = boardOf(config); const sets = [];
+  const B = boardOf(config); const sets = []; let oledN = 0;
   // Abgewählte Funktionen (Gerät, Reiter "Gerät") brauchen keine Anschlüsse.
   const on = k => config.features?.[k] !== false;
   (on('displays') ? config.displays || [] : []).slice().sort((x, y) => x.slot - y.slot)
     .filter(d => d.slot <= B.maxDisplays)
-    .forEach(d => sets.push(d.type === 'seg' ? segSet(d, B) : tftSet(d, B)));
+    .forEach(d => { if (d.type === 'oled') sets.push(oledSet(d, B, oledN++)); else sets.push(tftSet(d, B)); });
   if (on('audio')) sets.push({
     title: 'Lautsprecher: Verstärker MAX98357A',
     sub: 'Der Lautsprecher selbst kommt an die Klemmen des Verstärkers, nicht an den ESP32.',

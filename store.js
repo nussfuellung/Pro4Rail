@@ -1,5 +1,6 @@
 // Pro4Rail: Backend-Schicht. Demo-Modus (localStorage) oder Supabase. Die App kennt nur dieses Interface.
 import { CONFIG } from './config.js';
+import { OLED_DEFAULT } from './oled.js';
 
 export const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
 let sb = null;
@@ -25,9 +26,12 @@ export const demoConfig = () => ({
   ...defaultConfig(), demo: true,
   displays: [{
     slot: 1, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320 }, landscape: true,
-    seg: { kind: '7seg', driver: 'TM1637', digits: 4 },
+    oled: { ...OLED_DEFAULT },
     content: 'abfahrt', station: { id: '8000105', name: 'Frankfurt(Main)Hbf' },
-    rows: 3, filter: '', imageId: null,
+    rows: 3, filter: '', platform: '', imageIds: [], interval: 10,
+  }, {
+    slot: 2, type: 'oled', tft: { model: 'ST7789', w: 240, h: 320, landscape: true }, oled: { ...OLED_DEFAULT },
+    content: 'abfahrt', station: { id: '8000105', name: 'Frankfurt(Main)Hbf' }, rows: 2, filter: '', platform: '', imageIds: [], interval: 10,
   }],
   light: { on: false, brightness: 100, dimmable: true },
 });
@@ -214,7 +218,7 @@ export const Media = {
     if (DEMO) {
       const all = LS.get('demo_media', []);
       const item = { id, name: file.name, kind, size: file.size, created_at: new Date().toISOString() };
-      if (kind === 'image' && file.size < 400000) item.dataUrl = await blobToDataUrl(file);
+      if (kind === 'image' && file.size < 900000) item.dataUrl = await blobToDataUrl(file);
       if (kind === 'audio') objectUrls.set(id, URL.createObjectURL(file));
       all.unshift(item); LS.set('demo_media', all);
       return item;

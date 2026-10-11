@@ -25,9 +25,11 @@ export function clockScreen({ tft, now = new Date() }) {
   return wrap(w, h, `<div class="tft-clock" style="font-size:${Math.round(78 * s)}px">${t}</div><div class="tft-date" style="font-size:${Math.round(18 * s)}px">${esc(d)}</div>`);
 }
 
-export function imageScreen({ tft, url }) {
-  const { w, h } = screenSize(tft);
-  return wrap(w, h, `<img src="${esc(url)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block">`, '#000');
+// Ein oder mehrere Bilder (JPEG, PNG, GIF). Bei mehreren wechseln sie alle `interval` Sekunden (activateSlides in marquee.js).
+export function imageScreen({ tft, url, urls, interval = 10 }) {
+  const { w, h } = screenSize(tft); const list = urls || [url];
+  const imgs = list.map((u, i) => `<img src="${esc(u)}" alt="" class="${i === 0 ? 'on' : ''}">`).join('');
+  return wrap(w, h, `<div class="slides" data-interval="${Number(interval) || 10}">${imgs}</div>`, '#000');
 }
 
 // deps: Abfahrten in der Form { line, dir, when, planned, delay (Minuten oder null), platform, cancelled }
@@ -48,8 +50,65 @@ export function departureScreen({ tft, rows = 2, stationName = '', deps = [], no
     return `<div class="tft-row" style="height:${rowH}px">
       <div class="c" style="width:${cTime}px"><b style="font-size:${f(21)}px;${d.cancelled ? 'text-decoration:line-through;opacity:.7' : ''}">${hhmm(d.planned || d.when)}</b>${ca}</div>
       <div class="c" style="width:${cTrain}px"><b style="font-size:${f(15)}px">${esc(d.line)}</b></div>
-      <div class="c grow"><b class="dest" style="font-size:${f(19)}px">${esc(d.dir)}</b>${sub}</div>
+      <div class="c grow"><b class="dest mq" style="font-size:${f(19)}px"><span>${esc(d.dir)}</span></b>${sub}</div>
       <div class="c r" style="width:${cPlat}px"><b style="font-size:${f(21)}px">${esc(d.platform || '')}</b></div></div>`;
   }).join('') : `<div class="tft-none" style="font-size:${f(15)}px">Keine Abfahrten</div>`;
   return wrap(w, h, head + body);
+}
+
+// ---------- Zugzielanzeiger am Gleis ----------
+// Nachempfunden den LED-Zugzielanzeigern der Bahn: leuchtend blau, cremeweiße Punktschrift, zwei Reihen aus je fünf Modulen.
+// Obere Reihe: Gleis | Hinweis (Verspätung) und Zwischenhalte | Zeit und Zug. Untere Reihe: Ziel in großer Schrift.
+// Schrift und Zeichen der Bahn sind geschützt und nicht enthalten, die Schrift ist DotGothic16.
+export const ZZA = { frame: '#141a3a', bg: '#0e4fd0', seam: 'rgba(5,12,50,.55)', text: '#f7f4dc', strip: '#f1eecf', stripText: '#0c2f8f' };
+
+// Gleis passt: "3" trifft 3, 3a und "3 A-D", aber nicht 13. Mehrere Gleise mit Komma: "3,4".
+export function platformMatches(platform, wanted) {
+  const p = String(platform ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return String(wanted ?? '').toLowerCase().split(/[,;]+/).map(x => x.trim()).filter(Boolean)
+    .some(t => p === t || (p.startsWith(t) && !/\d/.test(p[t.length] || '')));
+}
+
+// Hinweistext wie auf der Anzeige: deutsch und englisch hintereinander
+export function zzaNotice(dep) {
+  if (!dep) return 'Zurzeit keine Abfahrt   No departure at the moment';
+  if (dep.cancelled) return 'Zug fällt aus   Train cancelled';
+  if (dep.delay > 0) return `ca. ${dep.delay} Min. später   approx. ${dep.delay} min. delay`;
+  return '';
+}
+
+// Zwischenhalte auf zwei Zeilen verteilen (grob nach Zeichenzahl, was nicht passt, läuft als Laufschrift)
+function viaLines(via = [], cap) {
+  const lines = ['', '']; let i = 0;
+  for (const v of via) {
+    if (lines[i] && (lines[i] + '  ' + v).length > cap) { if (i === 1) break; i = 1; }
+    lines[i] = lines[i] ? lines[i] + '  ' + v : v;
+  }
+  return lines.filter(Boolean);
+}
+
+// dep: nächste Abfahrt am Gleis (oder null). via: Namen der Zwischenhalte, wenn bekannt.
+export function zugzielScreen({ tft, platform = '', dep = null, now = new Date() }) {
+  const { w, h } = screenSize(tft);
+  const bh = Math.min(h, Math.round(w / 2.05)), top = Math.round((h - bh) / 2);
+  const p = Math.max(3, Math.round(w / 64)), rh = Math.floor((bh - 3 * p) / 2), rw = w - 2 * p;
+  const fs = v => Math.max(8, Math.round(v * rh));
+  const A = Math.round(rw * .2), B = Math.round(rw * .6), C = rw - A - B;
+  const seams = [20, 40, 60, 80].map(x => `<i class="zs" style="left:${x}%"></i>`).join('');
+  const msg = zzaNotice(dep);
+  const stripH = Math.round(rh * .3), viaFs = fs(.22);
+  const lines = viaLines(dep?.via, Math.floor(B / (viaFs * .55)));
+  const gl = String(platform || '').trim();
+  const t = dep ? hhmm(dep.planned || dep.when) : '';
+  const abs = (l, t2, wd, hd, inner, cls = '') => `<div class="za ${cls}" style="left:${l}px;top:${t2}px;width:${wd}px;height:${hd}px">${inner}</div>`;
+  const mq = (txt, size, cls = '') => `<div class="mq ${cls}" style="font-size:${size}px;line-height:${Math.round(size * 1.15)}px"><span>${esc(txt)}</span></div>`;
+  const row1 = `<div class="zrow" style="left:${p}px;top:${p}px;width:${rw}px;height:${rh}px">${seams}
+    ${abs(Math.round(rw * .03), 0, A - 2, rh, `<b class="zgl" style="font-size:${fs(gl.length > 2 ? .55 : .86)}px">${esc(gl)}</b>`, 'v')}
+    ${msg ? abs(A, Math.round(rh * .04), B, stripH, mq(msg, fs(.2)), 'zstrip') : ''}
+    ${lines.map((l, i) => abs(A + 4, Math.round(rh * .04) + stripH + Math.round(rh * .06) + i * Math.round(viaFs * 1.3), B - 8, Math.round(viaFs * 1.2), mq(l, viaFs))).join('')}
+    ${abs(A + B, 0, C - Math.round(rw * .02), rh, `<b class="ztime" style="font-size:${fs(.34)}px;${dep?.cancelled ? 'text-decoration:line-through;opacity:.7' : ''}">${t}</b>${dep ? `<b class="ztrain" style="font-size:${fs(.2)}px">${esc(dep.line)}</b>` : ''}`, 'r v')}
+  </div>`;
+  const row2 = `<div class="zrow" style="left:${p}px;top:${2 * p + rh}px;width:${rw}px;height:${rh}px">${seams}
+    ${dep ? abs(A + 4, 0, rw - A - 8, rh, mq(dep.dir, fs(.5)), 'v zdest') : ''}</div>`;
+  return { w, h, html: `<div class="tft zza" style="width:${w}px;height:${h}px;background:${ZZA.frame}"><div class="zboard" style="top:${top}px;height:${bh}px">${row1}${row2}</div></div>` };
 }

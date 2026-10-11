@@ -1,8 +1,10 @@
 import { CONFIG } from './config.js';
+import { OLED_MODELS, OLED_COLORS, OLED_DEFAULT, oledSize, oledDepartureScreen, oledClockScreen } from './oled.js';
 import { DEMO, initStore, Auth, Devices, Media, defaultConfig, uid } from './store.js';
 import { pinSets, BOARDS, boardOf, boardWarnings } from './pins.js';
 import { searchStations, getDepartures, clearDepartureCache } from './transport.js';
-import { TFT_MODELS, screenSize, departureScreen, clockScreen, imageScreen } from './tft.js';
+import { TFT_MODELS, screenSize, departureScreen, clockScreen, imageScreen, zugzielScreen, platformMatches } from './tft.js';
+import { activateMarquee, activateSlides } from './marquee.js';
 import { pageRocrail } from './rocrail.js';
 
 const $ = s => document.querySelector(s);
@@ -74,19 +76,17 @@ function toggleTheme() {
   if (m) m.content = next === 'dark' ? '#1d2631' : '#f6f8f9';
 }
 
-const SEG_KINDS = { '7seg': '7-Segment', '14seg': '14-Segment', '16seg': '16-Segment' };
-const SEG_DRIVERS = { TM1637: 'TM1637 (4 oder 6 Stellen)', MAX7219: 'MAX7219 (bis 8 Stellen)', HT16K33: 'HT16K33 (I²C, 4 Stellen)' };
 const CONTENT = {
-  tft: { abfahrt: 'Bahnhofstafel mit Abfahrten', uhr: 'Uhr', bild: 'Bild (JPEG)' },
-  seg: { min_bis: 'Minuten bis zur nächsten Abfahrt', zeit: 'Abfahrtszeit des nächsten Zugs', verspaetung: 'Verspätung in Minuten', gleis: 'Gleis des nächsten Zugs', uhr: 'Uhr' },
+  tft: { abfahrt: 'Bahnhofstafel mit Abfahrten', zugziel: 'Zugzielanzeiger (Gleisanzeige)', uhr: 'Uhr', bild: 'Werbung (Bilder und GIFs)' },
+  oled: { abfahrt: 'Abfahrtsliste als Text', uhr: 'Uhr' },
 };
 const DAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 const DAY_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
 const newDisplay = slot => ({
   slot, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320, landscape: true },
-  seg: { kind: '7seg', driver: 'TM1637', digits: 4 },
-  content: 'abfahrt', station: null, rows: 2, filter: '', imageId: null,
+  oled: { ...OLED_DEFAULT },
+  content: 'abfahrt', station: null, rows: 2, filter: '', platform: '', imageIds: [], interval: 10,
 });
 
 // ---------- Fahrplandaten (Vorschau direkt aus der PWA) ----------
@@ -96,7 +96,7 @@ function applyFilter(list, filter) {
 }
 
 // Rahmen für eine TFT-Darstellung. Die Skalierung auf die Breite des Fensters macht fitScreens().
-const tftBox = scr => `<div class="tftwrap" data-w="${scr.w}" data-h="${scr.h}">${scr.html}</div><p class="hint">Genau so erscheint es auf dem Display (${scr.w}×${scr.h} Pixel).</p>`;
+const tftBox = scr => `<div class="tftwrap" data-w="${scr.w}" data-h="${scr.h}">${scr.html}</div><p class="hint">Genau so erscheint es auf dem Display (${scr.px || scr.w + '×' + scr.h} Pixel).</p>`;
 function fitScreens(root) {
   root.querySelectorAll('.tftwrap').forEach(wrapEl => {
     const w = Number(wrapEl.dataset.w), h = Number(wrapEl.dataset.h);
@@ -106,36 +106,31 @@ function fitScreens(root) {
     inner.style.transform = `scale(${sc})`;
     wrapEl.style.width = Math.round(w * sc) + 'px'; wrapEl.style.height = Math.round(h * sc) + 'px';
   });
+  activateMarquee(root); activateSlides(root);   // Laufschrift und Bildwechsel starten, sobald die Vorschau sichtbar ist
 }
 window.addEventListener('resize', debounce(() => fitScreens(document), 120));
 
 async function previewHtml(disp) {
-  const isSeg = disp.type === 'seg';
+  const isOled = disp.type === 'oled';
   const note = t => `<p class="hint">${t}</p>`;
-  if (disp.content === 'uhr') {
-    if (!isSeg) return tftBox(clockScreen({ tft: disp.tft }));
-    const t = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="seg">${t}<small>Uhr</small></div>`;
-  }
+  if (disp.content === 'uhr') return tftBox(isOled ? oledClockScreen({ oled: disp.oled }) : clockScreen({ tft: disp.tft }));
   if (disp.content === 'bild') {
-    const item = mediaList.find(m => m.id === disp.imageId);
-    const url = item ? await Media.url(item) : null;
-    return url ? tftBox(imageScreen({ tft: disp.tft, url })) : note('Wähle ein Bild bei den Medien. Hier erscheint es dann so, wie es auf dem Display aussieht.');
+    const items = (disp.imageIds || []).map(id => mediaList.find(m => m.id === id)).filter(Boolean);
+    const urls = (await Promise.all(items.map(it => Media.url(it)))).filter(Boolean);
+    return urls.length ? tftBox(imageScreen({ tft: disp.tft, urls, interval: disp.interval })) + (urls.length > 1 ? note(`${urls.length} Bilder, Wechsel alle ${disp.interval || 10} Sekunden.`) : '')
+      : note('Hake bei den Bildern unten mindestens eine Datei an. Hier erscheint sie dann so, wie sie auf dem Display aussieht.');
   }
+  if (disp.content === 'zugziel' && !String(disp.platform || '').trim()) return note('Gib das Gleis ein, dann erscheint hier die Vorschau.');
   if (!disp.station) return note('Wähle einen Bahnhof, dann erscheint hier die Live-Vorschau.');
   try {
     const list = applyFilter(await getDepartures(disp.station), disp.filter);
-    if (!list.length) return note('Keine Abfahrten gefunden. Prüfe den Linienfilter.');
-    if (isSeg) {
-      const n = list[0]; const digits = disp.seg.digits || 4;
-      let txt, cap;
-      if (disp.content === 'min_bis') { txt = String(Math.max(0, Math.round((new Date(n.when) - Date.now()) / 60000))); cap = 'Minuten'; }
-      else if (disp.content === 'zeit') { txt = hhmm(n.when).replace(':', '.'); cap = 'Abfahrt'; }
-      else if (disp.content === 'verspaetung') { txt = String(n.delay ?? 0); cap = 'Minuten Verspätung'; }
-      else { txt = String(n.platform || '-'); cap = 'Gleis'; }
-      const shown = txt.slice(-digits).padStart(digits, ' ').replace(/ /g, '&nbsp;');
-      return `<div class="seg">${shown}<small>${cap}, ${esc(n.line)} nach ${esc(n.dir)}</small></div>`;
+    if (!list.length && disp.content !== 'zugziel') return note('Keine Abfahrten gefunden. Prüfe den Linienfilter.');
+    if (disp.content === 'zugziel') {
+      const onPlat = list.filter(d => platformMatches(d.platform, disp.platform));
+      return tftBox(zugzielScreen({ tft: disp.tft, platform: disp.platform, dep: onPlat[0] || null }))
+        + (onPlat.length ? '' : note(`Zurzeit keine Abfahrt an Gleis ${esc(disp.platform)}. So sieht die Anzeige dann aus.`));
     }
+    if (isOled) return tftBox(oledDepartureScreen({ oled: disp.oled, stationName: disp.station.name, deps: list }));
     return tftBox(departureScreen({ tft: disp.tft, rows: disp.rows || 2, stationName: disp.station.name, deps: list }));
   } catch (e) {
     return note(`Vorschau nicht verfügbar: ${esc(e.message)}.`);
@@ -344,7 +339,7 @@ async function pageDevices() {
   const rows = list.map((d, i) => {
     const disp = d.config?.displays || [];
     const rules = d.config?.audio?.rules?.length || 0;
-    const chips = disp.map(x => `<span class="chip">Anzeige ${x.slot}: ${x.type === 'seg' ? 'Segment' : 'TFT'}${x.station ? ', ' + esc(x.station.name) : ''}</span>`).join('')
+    const chips = disp.map(x => `<span class="chip">Anzeige ${x.slot}: ${x.type === 'oled' ? 'OLED' : 'TFT'}${x.station ? ', ' + esc(x.station.name) : ''}</span>`).join('')
       + (rules ? `<span class="chip">${rules} ${rules === 1 ? 'Ansage' : 'Ansagen'}</span>` : '');
     return `<a class="dev ${isOnline(d) ? 'on' : ''}" href="#/device/${esc(d.id)}">
       <span class="gleis" aria-hidden="true">${i + 1}</span>
@@ -484,6 +479,19 @@ function normConfig(c) {
   if (!BOARDS[o.board]) o.board = base.board;
   if (!Array.isArray(o.audio.rules)) o.audio.rules = [];
   if (!Array.isArray(o.displays)) o.displays = [];
+  // Ältere Geräte: Segmentanzeigen gibt es nicht mehr, sie werden zu OLED-Textdisplays. Fehlende Teile ergänzen.
+  o.displays = o.displays.map(d => {
+    const n = { ...d, tft: { model: 'ST7789', w: 240, h: 320, landscape: true, ...d.tft }, oled: { ...OLED_DEFAULT, ...d.oled } };
+    n.imageIds = Array.isArray(n.imageIds) ? n.imageIds : (n.imageId ? [n.imageId] : []);   // früher nur ein Bild
+    delete n.imageId;
+    n.interval = Math.min(3600, Math.max(2, Number(n.interval) || 10)); n.platform = n.platform || '';
+    if (n.type === 'seg') { n.type = 'oled'; n.content = n.content === 'uhr' ? 'uhr' : 'abfahrt'; }
+    delete n.seg;
+    if (!OLED_MODELS[n.oled.model]) n.oled.model = OLED_DEFAULT.model;
+    if (!OLED_COLORS[n.oled.color]) n.oled.color = OLED_DEFAULT.color;
+    if (!CONTENT[n.type]?.[n.content]) n.content = 'abfahrt';
+    return n;
+  });
   return o;
 }
 
@@ -565,31 +573,51 @@ async function pageDirekt() {
   });
 }
 
+// Auswahl der Bilder für eine Werbeanzeige. Die Reihenfolge ist die Reihenfolge des Anhakens.
+function imagePicker(d, i, images) {
+  if (!images.length) return '<p class="hint" style="margin-top:14px">Noch keine Bilder. Lade bei <a href="#/media">Medien</a> JPEG, PNG oder GIF hoch.</p>';
+  const sel = d.imageIds || [];
+  return `<div style="margin-top:14px"><span class="lbl">Bilder (der Reihe nach, bei mehreren wechseln sie automatisch)</span><ul class="imgpick">${images.map(m => {
+    const n = sel.indexOf(m.id) + 1;
+    return `<li><label><input type="checkbox" data-img="${i}" value="${esc(m.id)}" ${n ? 'checked' : ''}><img data-mid="${esc(m.id)}" alt=""><span class="nm">${esc(m.name)}</span>${n ? `<span class="ord" title="Reihenfolge">${n}</span>` : ''}</label></li>`;
+  }).join('')}</ul></div>`;
+}
+async function loadThumbs(root) {
+  for (const img of root.querySelectorAll('img[data-mid]:not([src])')) {
+    const it = mediaList.find(m => m.id === img.dataset.mid); const u = it ? await Media.url(it) : null; if (u) img.src = u;
+  }
+}
+
 function tabAnzeigen() {
   const c = draft.config;
   const images = mediaList.filter(m => m.kind === 'image');
   const blocks = c.displays.map((d, i) => {
     const p = `config.displays.${i}`;
-    const isSeg = d.type === 'seg';
-    const needsStation = ['abfahrt', 'min_bis', 'zeit', 'verspaetung', 'gleis'].includes(d.content);
-    const sum = isSeg ? `${SEG_KINDS[d.seg.kind]}, ${d.seg.driver}` : `TFT ${d.tft.model}`;
+    const isOled = d.type === 'oled';
+    const needsStation = d.content === 'abfahrt' || d.content === 'zugziel';
+    const sum = isOled ? `OLED ${OLED_MODELS[d.oled.model].label}` : `TFT ${d.tft.model}`;
     return `<details class="panel disp" data-slot="${d.slot}" ${openDisp.has(d.slot) ? 'open' : ''}>
       <summary><span class="disp-t"><b>Anzeige ${d.slot}</b><small>${esc(sum)}${d.station ? ', ' + esc(d.station.name) : ''}</small></span><i class="chev" aria-hidden="true"></i></summary>
       <div class="grid">
-        <label class="field"><span class="lbl">Bauart</span>${sel(`${p}.type`, d.type, [['tft', 'TFT-Display'], ['seg', 'LED-Segmentanzeige']], 'data-rerender')}</label>
-        ${isSeg ? `
-          <label class="field"><span class="lbl">Segmente</span>${sel(`${p}.seg.kind`, d.seg.kind, Object.entries(SEG_KINDS), 'data-rerender')}</label>
-          <label class="field"><span class="lbl">Treiber-Chip</span>${sel(`${p}.seg.driver`, d.seg.driver, Object.entries(SEG_DRIVERS), 'data-rerender')}</label>
-          <label class="field"><span class="lbl">Anzahl Stellen</span><input type="number" min="1" max="8" data-num data-rerender data-k="${p}.seg.digits" value="${d.seg.digits}"></label>` : `
+        <label class="field"><span class="lbl">Bauart</span>${sel(`${p}.type`, d.type, [['tft', 'TFT-Display'], ['oled', 'OLED-Textdisplay (I²C)']], 'data-rerender')}</label>
+        ${isOled ? `
+          <label class="field"><span class="lbl">Modell</span>${sel(`${p}.oled.model`, d.oled.model, Object.entries(OLED_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
+          <label class="field"><span class="lbl">Farbe der Pixel</span>${sel(`${p}.oled.color`, d.oled.color, Object.entries(OLED_COLORS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>` : `
           <label class="field"><span class="lbl">Modell</span>${sel(`${p}.tft.model`, d.tft.model, Object.entries(TFT_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
           <label class="field"><span class="lbl">Ausrichtung</span>${sel(`${p}.tft.landscape`, String(d.tft.landscape !== false), [['true', 'Querformat (wie eine Bahnhofstafel)'], ['false', 'Hochformat']], 'data-bool data-rerender')}</label>`}
         <label class="field"><span class="lbl">Inhalt</span>${sel(`${p}.content`, d.content, Object.entries(CONTENT[d.type]), 'data-rerender')}</label>
-        ${!isSeg && d.content === 'abfahrt' ? `<label class="field"><span class="lbl">Zeilen</span>${sel(`${p}.rows`, d.rows, [1, 2, 3, 4].map(n => [n, n]), 'data-num data-rerender')}</label>` : ''}
+        ${isOled && d.content === 'abfahrt' ? `
+          <label class="field"><span class="lbl">Rechte Spalte</span>${sel(`${p}.oled.right`, d.oled.right, [['min', 'Minuten bis Abfahrt'], ['zeit', 'Abfahrtszeit (mit Verspätung)']], 'data-rerender')}</label>
+          <label class="field"><span class="lbl">Kopfzeile</span>${sel(`${p}.oled.header`, String(d.oled.header !== false), [['true', 'Bahnhof und Uhrzeit'], ['false', 'Aus (mehr Abfahrten)']], 'data-bool data-rerender')}</label>` : ''}
+        ${!isOled && d.content === 'abfahrt' ? `<label class="field"><span class="lbl">Zeilen</span>${sel(`${p}.rows`, d.rows, [1, 2, 3, 4].map(n => [n, n]), 'data-num data-rerender')}</label>` : ''}
         ${needsStation ? `<label class="field"><span class="lbl">Nur diese Linien (zum Beispiel RE5, S1)</span><input type="text" data-rerender data-k="${p}.filter" value="${esc(d.filter)}"></label>` : ''}
-        ${!isSeg && d.content === 'bild' ? `<label class="field"><span class="lbl">Bild</span>${sel(`${p}.imageId`, d.imageId || '', [['', 'Bild wählen …'], ...images.map(m => [m.id, m.name])], 'data-rerender')}</label>` : ''}
+        ${!isOled && d.content === 'zugziel' ? `<label class="field"><span class="lbl">Gleis (zum Beispiel 3 oder 3,4)</span><input type="text" data-rerender data-k="${p}.platform" value="${esc(d.platform)}" maxlength="12" autocomplete="off"></label>` : ''}
+        ${!isOled && d.content === 'bild' ? `<label class="field"><span class="lbl">Sekunden pro Bild</span><input type="number" min="2" max="3600" data-num data-rerender data-k="${p}.interval" value="${d.interval || 10}"></label>` : ''}
       </div>
+      ${!isOled && d.content === 'bild' ? imagePicker(d, i, images) : ''}
       ${needsStation ? `<div style="margin-top:14px"><label class="field"><span class="lbl">Bahnhof${d.station ? `: <strong style="color:var(--ink)">${esc(d.station.name)}</strong>` : ''}</span>
         <input type="text" placeholder="Bahnhof suchen" data-search="${i}" autocomplete="off"></label><div class="res" id="res${i}" hidden></div></div>` : ''}
+      ${isOled && d.content === 'abfahrt' ? `<p class="hint" style="margin-top:10px">Dieses Display hat ${oledSize(d.oled).cols} Zeichen pro Zeile und zeigt ${oledSize(d.oled).lines - (d.oled.header !== false ? 1 : 0)} Abfahrten.</p>` : ''}
       <div class="prev" data-prev="${i}"><p class="hint">Vorschau wird geladen</p></div>
       <div class="row disp-foot"><button type="button" class="small" data-act="bigprev" data-i="${i}">Vorschau</button><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
     </details>`;
@@ -598,7 +626,7 @@ function tabAnzeigen() {
   const add = c.displays.length < maxD
     ? `<button type="button" class="${c.displays.length ? 'ghost' : ''}" data-act="add">Anzeige hinzufügen</button>`
     : `<p class="muted">Dieses Board unterstützt höchstens ${maxD} Anzeigen.</p>`;
-  return warnHtml() + (blocks || `<div class="panel empty" style="margin-bottom:16px"><h2>Noch keine Anzeige</h2><p class="muted">Füge die erste Anzeige hinzu und wähle, ob ein TFT oder eine Segmentanzeige angeschlossen ist.</p></div>`) + add;
+  return warnHtml() + (blocks || `<div class="panel empty" style="margin-bottom:16px"><h2>Noch keine Anzeige</h2><p class="muted">Füge die erste Anzeige hinzu und wähle, ob ein TFT oder ein OLED-Textdisplay angeschlossen ist.</p></div>`) + add;
 }
 
 function tabAnsagen() {
@@ -643,7 +671,7 @@ function tabGeraet() {
     <p class="hint">Geräte-ID: ${esc(draft.device_uid)}</p></section>
     <section class="section" style="margin-top:32px;max-width:560px"><h2>Funktionen</h2>
       <p class="muted">Schalte ab, was an diesem Gerät nicht verbaut ist. Die Funktion verschwindet aus der App und braucht keine Anschlüsse. Einstellungen bleiben erhalten.</p>
-      <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder Segmentanzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
+      <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder OLED-Anzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
         <div class="fn"><div class="fn-main"><b>${t}</b><small>${s}</small></div>
           <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>${k === 'light' && feat('light') ? `
         <div class="fn sub"><div class="fn-main"><b>Dimmbar</b><small>Nur einschalten, wenn das Licht stufenlos regelbar ist. Sonst gibt es nur An und Aus.</small></div>
@@ -665,7 +693,7 @@ function renderDevice() {
   window.scrollTo(0, y);
   app.querySelector('.tabs .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   bindDevice();
-  if (tab === 'anzeigen') fillPreviews();
+  if (tab === 'anzeigen') { fillPreviews(); loadThumbs(app); }
 }
 
 async function fillPreviews() {
@@ -732,6 +760,11 @@ function bindDevice() {
   }));
   bindFn(app, () => draft);
 
+  app.querySelectorAll('[data-img]').forEach(el => el.addEventListener('change', () => {
+    const d = draft.config.displays[Number(el.dataset.img)]; const set = (d.imageIds || []).filter(x => x !== el.value);
+    if (el.checked) set.push(el.value);
+    d.imageIds = set; markDirty(); renderDevice();
+  }));
   app.querySelectorAll('[data-k]').forEach(el => {
     const val = () => {
       let v = el.type === 'checkbox' ? el.checked : el.value;
@@ -750,7 +783,7 @@ function bindDevice() {
       markDirty();
       let m;
       if ((m = el.dataset.k.match(/^config\.displays\.(\d+)\.type$/))) {
-        const d = draft.config.displays[m[1]]; d.content = d.type === 'seg' ? 'min_bis' : 'abfahrt';
+        const d = draft.config.displays[m[1]]; d.content = 'abfahrt'; d.oled = { ...OLED_DEFAULT, ...d.oled };
       }
       if ((m = el.dataset.k.match(/^config\.displays\.(\d+)\.tft\.model$/))) {
         const d = draft.config.displays[m[1]]; d.tft.w = TFT_MODELS[d.tft.model].w; d.tft.h = TFT_MODELS[d.tft.model].h;
@@ -840,8 +873,8 @@ async function pageMedia() {
   const pct = Math.min(100, Math.round(total / CONFIG.MAX_USER_BYTES * 100));
   app.innerHTML = `<div class="pagehead"><h1>Medien</h1></div>
     <div class="panel" style="margin-bottom:20px;max-width:640px"><label class="field"><span class="lbl">MP3 für Ansagen oder Bild für ein Display hinzufügen</span>
-      <input id="file" type="file" accept="audio/mpeg,.mp3,image/jpeg,image/png"></label>
-      <p class="hint">MP3 bis ${CONFIG.MAX_AUDIO_BYTES / 1048576} MB. Bilder werden auf höchstens 320 Pixel Kantenlänge verkleinert und als JPEG gespeichert. MP4-Video folgt später.</p>
+      <input id="file" type="file" accept="audio/mpeg,.mp3,image/jpeg,image/png,image/gif"></label>
+      <p class="hint">MP3 bis ${CONFIG.MAX_AUDIO_BYTES / 1048576} MB. JPEG und PNG werden auf höchstens 320 Pixel Kantenlänge verkleinert und als JPEG gespeichert. GIFs bleiben animiert und werden unverändert gespeichert (bis ${CONFIG.MAX_GIF_BYTES / 1048576} MB und 480 Pixel Kantenlänge). MP4-Video folgt später.</p>
       <div class="meter" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
       <p class="hint">${(total / 1048576).toFixed(1)} von ${CONFIG.MAX_USER_BYTES / 1048576} MB belegt</p></div>
     <div class="media-grid" id="grid"></div>`;
@@ -866,6 +899,12 @@ async function pageMedia() {
       if (f.type.startsWith('audio/') || /\.mp3$/i.test(f.name)) {
         kind = 'audio';
         if (f.size > CONFIG.MAX_AUDIO_BYTES) throw new Error('Die MP3 ist größer als erlaubt.');
+      } else if (f.type === 'image/gif') {
+        // GIFs bleiben unverändert (sonst ginge die Animation verloren), müssen aber klein genug sein
+        kind = 'image';
+        if (f.size > CONFIG.MAX_GIF_BYTES) throw new Error(`Das GIF ist größer als ${CONFIG.MAX_GIF_BYTES / 1048576} MB. Verkleinere es zum Beispiel auf 320 Pixel Kantenlänge.`);
+        const bmp = await createImageBitmap(f);
+        if (Math.max(bmp.width, bmp.height) > 480) throw new Error(`Das GIF ist ${bmp.width}×${bmp.height} Pixel groß. Höchstens 480 Pixel Kantenlänge sind erlaubt.`);
       } else if (f.type.startsWith('image/')) { kind = 'image'; f = await resizeImage(f); }
       else if (f.type.startsWith('video/')) throw new Error('MP4 wird noch nicht unterstützt.');
       else throw new Error('Dieser Dateityp wird nicht unterstützt.');

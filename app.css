@@ -3,6 +3,7 @@
 @font-face{font-family:"Barlow";font-weight:500;font-style:normal;font-display:swap;src:url(fonts/barlow-latin-500-normal.woff2) format("woff2")}
 @font-face{font-family:"Barlow";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/barlow-latin-600-normal.woff2) format("woff2")}
 @font-face{font-family:"Barlow";font-weight:700;font-style:normal;font-display:swap;src:url(fonts/barlow-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:"DotGothic16";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/dotgothic16-latin-400-normal.woff2) format("woff2")}
 @font-face{font-family:"Barlow Condensed";font-weight:500;font-style:normal;font-display:swap;src:url(fonts/barlow-condensed-latin-500-normal.woff2) format("woff2")}
 @font-face{font-family:"Barlow Condensed";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/barlow-condensed-latin-600-normal.woff2) format("woff2")}
 @font-face{font-family:"Barlow Condensed";font-weight:700;font-style:normal;font-display:swap;src:url(fonts/barlow-condensed-latin-700-normal.woff2) format("woff2")}
@@ -142,8 +143,6 @@ button:disabled{opacity:.5;cursor:default}
 .board .br{display:grid;grid-template-columns:70px 1fr auto;gap:10px;padding:6px 0;border-top:1px solid rgba(255,255,255,.18);align-items:baseline;font-size:22px;font-weight:600}
 .board .late{color:#ff8a7d;font-size:16px;margin-left:6px}
 .board .okk{color:#8ee9b2;font-size:16px;margin-left:6px}
-.seg{margin-top:14px;background:#160505;border-radius:4px;padding:14px 16px;text-align:left;font:700 54px/1 var(--cond);letter-spacing:5px;color:#ff3b30;text-shadow:0 0 10px rgba(255,59,48,.7);max-width:460px}
-.seg small{display:block;font:400 14px/1.3 var(--sans);letter-spacing:0;color:#c98a85;text-shadow:none;margin-top:8px}
 
 /* ---------- Ansagen-Regeln ---------- */
 .rule{margin-bottom:14px}
@@ -235,7 +234,7 @@ details.disp[open] .chev{transform:rotate(-135deg);margin-top:4px}
 details.disp>.grid,details.disp>div:not(.row){margin-left:16px;margin-right:16px}
 details.disp>.grid{margin-top:16px}
 .disp-foot{margin:16px;justify-content:flex-end}
-.prev{margin-bottom:0}
+.prev{margin:18px 0 0}
 
 /* ---------- Rocrail ---------- */
 .rr-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
@@ -329,7 +328,7 @@ button.danger.solid:hover{background:var(--bad);color:#fff;filter:brightness(1.0
 .tft-row .c{display:flex;flex-direction:column;justify-content:center;min-width:0;padding-right:6px}
 .tft-row .c.grow{flex:1}
 .tft-row .c.r{align-items:flex-end;padding-right:0}
-.tft-row .dest{font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tft-row .dest{font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;white-space:nowrap;overflow:hidden}
 .tft-none,.tft-clock,.tft-date{text-align:center}
 .tft-none{padding-top:40px;opacity:.8}
 .tft-clock{font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;padding-top:44px;line-height:1}
@@ -340,7 +339,7 @@ dialog.dlg.wide{width:min(720px,calc(100vw - 24px))}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* Anmeldung */
-.authbox{max-width:440px}
+.authbox{max-width:440px;margin:6vh auto 0}
 .authlead{margin:-4px 0 14px}
 .errtxt{color:var(--bad);font-weight:500}
 .okbox{color:var(--ok);font-weight:500}
@@ -351,3 +350,24 @@ dialog.dlg.wide{width:min(720px,calc(100vw - 24px))}
 .linkbtn{background:none;border:0;padding:0;min-height:0;color:var(--brand);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .authdone p{margin:0 0 10px}.authicon{color:var(--brand);margin-bottom:8px}
 .linkbtn,.pwtoggle{height:auto}
+.oled{position:absolute;left:0;top:0;transform-origin:0 0;background:#030407;box-sizing:border-box;padding:16px}
+
+/* Laufschrift, Bildwechsel */
+.mq{overflow:hidden;white-space:nowrap}.mq>span,.mq-track>span{display:inline-block}
+.mq-track{display:inline-block;white-space:nowrap;will-change:transform}.mq-gap{display:inline-block;height:1px}
+.slides{position:absolute;inset:0}.slides img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0}.slides img.on{opacity:1}
+/* Zugzielanzeiger */
+.zza{font-family:"DotGothic16","Barlow",monospace;color:#f7f4dc;font-variant-numeric:normal;line-height:1}
+.zboard{position:absolute;left:0;width:100%}
+.zrow{position:absolute;background:#0e4fd0;overflow:hidden}
+.zs{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:rgba(5,12,50,.55)}
+.za{position:absolute;overflow:hidden}.za.v{display:flex;flex-direction:column;justify-content:center}
+.za.r{align-items:flex-end;text-align:right}.za b{font-weight:400;line-height:1;white-space:nowrap}
+.za .mq{width:100%}.zstrip{background:#f1eecf;color:#0c2f8f}.zstrip.za{padding:0 4px;box-sizing:border-box;justify-content:center}
+.ztime{display:block}.ztrain{display:block;margin-top:.25em}
+.imgpick{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.imgpick label{display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
+.imgpick img{width:44px;height:32px;object-fit:cover;border-radius:3px;background:var(--panel2);flex:none}
+.imgpick .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imgpick .ord{min-width:24px;height:24px;border-radius:12px;background:var(--brand);color:var(--on-brand);font:600 13px/24px var(--sans);text-align:center}
+.imgpick input{width:20px;height:20px;accent-color:var(--brand);flex:none}

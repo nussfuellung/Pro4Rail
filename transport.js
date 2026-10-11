@@ -52,6 +52,7 @@ function fromTransitous(j) {
       when, planned, delay: Number.isFinite(delay) ? delay : null,
       platform: p.track || p.scheduledTrack || '',
       cancelled: !!(st.cancelled || st.tripCancelled),
+      via: (st.nextStops || []).map(x => x.name || x.stop?.name).filter(Boolean).slice(0, 6),   // nur wenn die Schnittstelle sie liefert
     });
   }
   return out.sort((a, b) => iso(a.when) - iso(b.when));

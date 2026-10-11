@@ -20,5 +20,6 @@ export const CONFIG = {
   DBREST_API: '',
   // Limits für Nutzer-Uploads
   MAX_AUDIO_BYTES: 5 * 1024 * 1024,
+  MAX_GIF_BYTES: 1.5 * 1024 * 1024,   // animierte GIFs bleiben unverändert
   MAX_USER_BYTES: 50 * 1024 * 1024,
 };
