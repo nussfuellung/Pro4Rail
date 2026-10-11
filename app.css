@@ -338,3 +338,16 @@ dialog.dlg.wide{width:min(720px,calc(100vw - 24px))}
 .pv{margin:6px 0 14px}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* Anmeldung */
+.authbox{max-width:440px}
+.authlead{margin:-4px 0 14px}
+.errtxt{color:var(--bad);font-weight:500}
+.okbox{color:var(--ok);font-weight:500}
+.hint:empty{display:none}
+.pwwrap{position:relative;display:block}.pwwrap input{padding-right:84px}
+.pwtoggle{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:0;color:var(--ink2);font-size:13px;padding:6px 8px;min-height:0;cursor:pointer}
+.authlinks{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:14px;color:var(--ink2)}
+.linkbtn{background:none;border:0;padding:0;min-height:0;color:var(--brand);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.authdone p{margin:0 0 10px}.authicon{color:var(--brand);margin-bottom:8px}
+.linkbtn,.pwtoggle{height:auto}

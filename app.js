@@ -25,7 +25,9 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400);
 }
-const isOnline = d => d.last_seen && Date.now() - new Date(d.last_seen).getTime() < 120000;
+const isDemoDev = d => !!d?.config?.demo;
+const simulated = d => DEMO || isDemoDev(d);   // läuft ohne Hardware: Ansagen hört man im Browser
+const isOnline = d => isDemoDev(d) || d.last_seen && Date.now() - new Date(d.last_seen).getTime() < 120000;
 const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '--:--';
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 function setPath(o, path, v) {
@@ -43,6 +45,7 @@ function ago(iso) {
   return `vor ${d} ${d === 1 ? 'Tag' : 'Tagen'}`;
 }
 function statusHtml(d) {
+  if (isDemoDev(d)) return '<span class="status on"><i></i>Demo, immer online</span>';
   if (isOnline(d)) return '<span class="status on"><i></i>online</span>';
   return `<span class="status"><i></i>${d.last_seen ? 'zuletzt ' + ago(d.last_seen) : 'noch nie verbunden'}</span>`;
 }
@@ -172,7 +175,9 @@ async function route() {
   const key = seg1 === 'device' || seg1 === 'add' ? 'devices' : ['devices', 'rocrail', 'media', 'installer', 'account'].includes(seg1) ? seg1 : '';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === key));
   if (cleanup) { try { cleanup(); } catch (e) { /* egal */ } cleanup = null; }
+  if (Auth.recovery) { if (user) return pageRecovery(); Auth.recovery = false; }
   if (!user) return pageLogin();
+  if (Auth.intent?.kind === 'confirmed') { Auth.intent = null; toast('E-Mail bestätigt. Willkommen bei Pro4Rail!'); }
   for (const [re, fn] of routes) {
     const m = h.match(re);
     if (m) {
@@ -185,18 +190,145 @@ async function route() {
 }
 
 // ---------- Anmeldung und Konto ----------
-function pageLogin() {
-  app.innerHTML = `<div style="max-width:420px"><div class="pagehead"><h1>Anmelden</h1></div><div class="panel">
-    <label class="field"><span class="lbl">E-Mail</span><input id="em" type="email" autocomplete="username"></label>
-    <label class="field" style="margin-top:14px"><span class="lbl">Passwort</span><input id="pw" type="password" autocomplete="current-password"></label>
-    <div class="row" style="margin-top:18px"><button id="in">Anmelden</button><button id="up" class="ghost">Konto erstellen</button></div>
-    <p class="hint" id="msg" role="alert"></p></div></div>`;
-  const go = async fn => {
-    try { await fn($('#em').value.trim(), $('#pw').value); route(); }
-    catch (e) { $('#msg').textContent = e.message; }
+const MAILRE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MIN_PW = 8;
+const MAIL_ICON = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+
+// Anmeldeseite mit mehreren Ansichten: in (Anmelden), up (Konto erstellen), confirm (Mail bestätigen), forgot / resetsent (Passwort vergessen)
+function pageLogin(view = 'in', ctx = {}) {
+  const fromRoute = Object.keys(ctx).length === 0;   // route() läuft beim Start mehrfach: Hinweis zum Link erst beim ersten Klick verwerfen
+  if (!fromRoute && Auth.intent?.kind === 'error') Auth.intent = null;
+  if (Auth.intent?.kind === 'error' && view === 'in' && !ctx.msg) {
+    ctx = { ...ctx, msg: 'Der Link aus der E-Mail ist abgelaufen oder wurde schon benutzt. Hast du dein Konto schon bestätigt, melde dich einfach an. Sonst fordere unter „Passwort vergessen?“ einen neuen Link an.' };
+  }
+  const email = ctx.email || '';
+  const shell = (title, lead, body) => { app.innerHTML = `<div class="authbox"><div class="pagehead"><h1>${title}</h1></div>${lead ? `<p class="muted authlead">${lead}</p>` : ''}${body}</div>`; };
+  const msg = (text, cls = 'errtxt') => `<p class="hint ${cls}" id="msg" role="alert">${text ? esc(text) : ''}</p>`;
+  const pwField = (id, label, auto) => `<label class="field pwf"><span class="lbl">${label}</span><span class="pwwrap"><input id="${id}" type="password" autocomplete="${auto}"><button type="button" class="pwtoggle" data-for="${id}" aria-label="Passwort anzeigen oder verbergen">Anzeigen</button></span></label>`;
+  const bindToggles = () => document.querySelectorAll('.pwtoggle').forEach(b => b.onclick = () => { const i = $('#' + b.dataset.for), h = i.type === 'password'; i.type = h ? 'text' : 'password'; b.textContent = h ? 'Verbergen' : 'Anzeigen'; });
+  const busy = (btn, label, on) => { btn.disabled = on; if (on) { btn.dataset.t = btn.textContent; btn.textContent = label; } else btn.textContent = btn.dataset.t || btn.textContent; };
+  const setMsg = (t, cls = 'errtxt') => { const m = $('#msg'); m.className = 'hint ' + cls; m.textContent = t; };
+
+  if (view === 'in') {
+    shell('Anmelden', '', `<form class="panel" id="f" novalidate>
+      <label class="field"><span class="lbl">E-Mail</span><input id="em" type="email" autocomplete="username" value="${esc(email)}"></label>
+      <div style="margin-top:14px">${pwField('pw', 'Passwort', 'current-password')}</div>
+      ${msg(ctx.msg)}<div id="extra"></div>
+      <div class="row" style="margin-top:14px"><button type="submit" id="in">Anmelden</button></div>
+      <p class="authlinks"><button type="button" class="linkbtn" id="forgot">Passwort vergessen?</button><span>Noch kein Konto? <button type="button" class="linkbtn" id="up">Konto erstellen</button></span></p></form>`);
+    bindToggles();
+    $('#forgot').onclick = () => pageLogin('forgot', { email: $('#em').value.trim() });
+    $('#up').onclick = () => pageLogin('up', { email: $('#em').value.trim() });
+    $('#f').onsubmit = async ev => {
+      ev.preventDefault();
+      const e = $('#em').value.trim(), p = $('#pw').value;
+      if (!MAILRE.test(e)) return setMsg('Bitte gib eine gültige E-Mail-Adresse ein.');
+      if (!p) return setMsg('Bitte gib dein Passwort ein.');
+      busy($('#in'), 'Melde an …', true); setMsg('', 'hint');
+      try { await Auth.signIn(e, p); route(); }
+      catch (err) {
+        busy($('#in'), '', false); setMsg(err.message);
+        if (err.code === 'email_not_confirmed') {
+          $('#extra').innerHTML = '<button type="button" class="ghost" id="rs" style="margin-top:8px">Bestätigungsmail erneut senden</button>';
+          $('#rs').onclick = async () => { try { await Auth.resend(e); setMsg('Die Mail ist unterwegs. Schau auch im Spam-Ordner nach.', 'okbox'); } catch (x) { setMsg(x.message); } };
+        }
+      }
+    };
+    return;
+  }
+
+  if (view === 'up') {
+    shell('Konto erstellen', 'Mit einer E-Mail-Adresse kann nur ein Konto angelegt werden. Danach schicken wir dir eine Mail, in der du die Adresse bestätigst.', `<form class="panel" id="f" novalidate>
+      <label class="field"><span class="lbl">E-Mail</span><input id="em" type="email" autocomplete="username" value="${esc(email)}"></label>
+      <div style="margin-top:14px">${pwField('pw', 'Passwort', 'new-password')}</div>
+      <p class="hint" style="margin-top:4px">Mindestens ${MIN_PW} Zeichen.</p>
+      <div style="margin-top:10px">${pwField('pw2', 'Passwort wiederholen', 'new-password')}</div>
+      ${msg(ctx.msg)}<div id="extra"></div>
+      <div class="row" style="margin-top:14px"><button type="submit" id="go">Konto erstellen</button></div>
+      <p class="authlinks"><span>Schon ein Konto? <button type="button" class="linkbtn" id="back">Anmelden</button></span></p></form>`);
+    bindToggles();
+    $('#back').onclick = () => pageLogin('in', { email: $('#em').value.trim() });
+    $('#f').onsubmit = async ev => {
+      ev.preventDefault();
+      const e = $('#em').value.trim(), p = $('#pw').value, p2 = $('#pw2').value;
+      $('#extra').innerHTML = '';
+      if (!MAILRE.test(e)) return setMsg('Bitte gib eine gültige E-Mail-Adresse ein.');
+      if (p.length < MIN_PW) return setMsg(`Das Passwort braucht mindestens ${MIN_PW} Zeichen.`);
+      if (p !== p2) return setMsg('Die beiden Passwörter sind nicht gleich.');
+      busy($('#go'), 'Erstelle Konto …', true); setMsg('', 'hint');
+      try {
+        const r = await Auth.signUp(e, p);
+        if (r.status === 'signedIn') return route();
+        if (r.status === 'confirm') return pageLogin('confirm', { email: e });
+        busy($('#go'), '', false);
+        setMsg('Zu dieser E-Mail-Adresse gibt es schon ein Konto. Melde dich an, oder setze das Passwort zurück, falls du es vergessen hast.');
+        $('#extra').innerHTML = '<div class="row" style="margin-top:8px"><button type="button" id="x-in">Zur Anmeldung</button><button type="button" class="ghost" id="x-fg">Passwort vergessen</button></div>';
+        $('#x-in').onclick = () => pageLogin('in', { email: e });
+        $('#x-fg').onclick = () => pageLogin('forgot', { email: e });
+      } catch (err) { busy($('#go'), '', false); setMsg(err.message); }
+    };
+    return;
+  }
+
+  if (view === 'confirm') {
+    shell('Bestätige deine E-Mail', '', `<div class="panel authdone"><div class="authicon">${MAIL_ICON}</div>
+      <p><strong>Wir haben dir eine Mail an ${esc(email)} geschickt.</strong></p>
+      <p>Öffne sie und klicke auf den Bestätigungslink. Erst danach kannst du dich anmelden.</p>
+      <p class="hint">Nichts angekommen? Schau im Spam-Ordner nach. Die Mail kann ein paar Minuten brauchen. Hast du dich vertippt, gehe zurück und erstelle das Konto mit der richtigen Adresse.</p>
+      ${msg('', 'hint')}
+      <div class="row" style="margin-top:14px"><button type="button" id="rs">Mail erneut senden</button><button type="button" class="ghost" id="back">Zur Anmeldung</button></div></div>`);
+    $('#back').onclick = () => pageLogin('in', { email });
+    const rs = $('#rs'); let t = 0;
+    const cool = () => { clearInterval(t); let n = 60; rs.disabled = true; const tick = () => { rs.textContent = `Erneut senden in ${n} s`; if (n-- <= 0) { clearInterval(t); rs.disabled = false; rs.textContent = 'Mail erneut senden'; } }; tick(); t = setInterval(tick, 1000); };
+    rs.onclick = async () => { try { await Auth.resend(email); setMsg('Die Mail ist unterwegs.', 'okbox'); cool(); } catch (x) { setMsg(x.message); } };
+    return;
+  }
+
+  if (view === 'forgot') {
+    shell('Passwort vergessen', 'Gib deine E-Mail-Adresse ein. Wir schicken dir einen Link, mit dem du ein neues Passwort festlegst.', `<form class="panel" id="f" novalidate>
+      <label class="field"><span class="lbl">E-Mail</span><input id="em" type="email" autocomplete="username" value="${esc(email)}"></label>
+      ${msg(ctx.msg)}
+      <div class="row" style="margin-top:14px"><button type="submit" id="go">Link senden</button><button type="button" class="ghost" id="back">Zurück</button></div></form>`);
+    $('#back').onclick = () => pageLogin('in', { email: $('#em').value.trim() });
+    $('#f').onsubmit = async ev => {
+      ev.preventDefault();
+      const e = $('#em').value.trim();
+      if (!MAILRE.test(e)) return setMsg('Bitte gib eine gültige E-Mail-Adresse ein.');
+      busy($('#go'), 'Sende …', true);
+      try { await Auth.resetPassword(e); pageLogin('resetsent', { email: e }); } catch (err) { busy($('#go'), '', false); setMsg(err.message); }
+    };
+    return;
+  }
+
+  if (view === 'resetsent') {
+    shell('Mail ist unterwegs', '', `<div class="panel authdone"><div class="authicon">${MAIL_ICON}</div>
+      <p><strong>Falls es zu ${esc(email)} ein Konto gibt, haben wir dir einen Link geschickt.</strong></p>
+      <p>Klicke darauf und lege ein neues Passwort fest. Schau auch im Spam-Ordner nach.</p>
+      <div class="row" style="margin-top:14px"><button type="button" id="back">Zur Anmeldung</button></div></div>`);
+    $('#back').onclick = () => pageLogin('in', { email });
+  }
+}
+
+// Nach dem Klick auf den Link aus der Passwort-Mail: neues Passwort festlegen
+function pageRecovery() {
+  app.innerHTML = `<div class="authbox"><div class="pagehead"><h1>Neues Passwort</h1></div><p class="muted authlead">Lege ein neues Passwort für ${esc(user.email)} fest.</p>
+    <form class="panel" id="f" novalidate>
+      <label class="field"><span class="lbl">Neues Passwort</span><input id="pw" type="password" autocomplete="new-password"></label>
+      <p class="hint" style="margin-top:4px">Mindestens ${MIN_PW} Zeichen.</p>
+      <label class="field" style="margin-top:10px"><span class="lbl">Passwort wiederholen</span><input id="pw2" type="password" autocomplete="new-password"></label>
+      <p class="hint errtxt" id="msg" role="alert"></p>
+      <div class="row" style="margin-top:14px"><button type="submit" id="go">Passwort speichern</button><button type="button" class="ghost" id="cancel">Abbrechen</button></div></form></div>`;
+  const setMsg = t => { $('#msg').textContent = t; };
+  $('#cancel').onclick = async () => { await Auth.signOut(); route(); };
+  $('#f').onsubmit = async ev => {
+    ev.preventDefault();
+    const p = $('#pw').value, p2 = $('#pw2').value;
+    if (p.length < MIN_PW) return setMsg(`Das Passwort braucht mindestens ${MIN_PW} Zeichen.`);
+    if (p !== p2) return setMsg('Die beiden Passwörter sind nicht gleich.');
+    $('#go').disabled = true; setMsg('');
+    try { await Auth.setPassword(p); toast('Passwort geändert. Du bist angemeldet.'); location.hash = '#/'; route(); }
+    catch (err) { $('#go').disabled = false; setMsg(err.message); }
   };
-  $('#in').onclick = () => go(Auth.signIn);
-  $('#up').onclick = () => go(async (e, p) => { const r = await Auth.signUp(e, p); if (r && !r.session) $('#msg').textContent = 'Bestätige die E-Mail und melde dich danach an.'; });
 }
 
 function pageAccount() {
@@ -221,7 +353,17 @@ async function pageDevices() {
   }).join('');
   app.innerHTML = `<div class="pagehead"><h1>Meine Geräte</h1><a class="btn" href="#/add">Gerät hinzufügen</a></div>` +
     (list.length ? `<div class="devlist">${rows}</div>`
-      : `<div class="panel empty"><h2>Noch kein Gerät</h2><p class="muted">Richte deinen ersten ESP32 ein. Du brauchst dafür nur ein WLAN und etwa fünf Minuten.</p><a class="btn" href="#/add">Gerät hinzufügen</a></div>`);
+      : `<div class="panel empty"><h2>Noch kein Gerät</h2><p class="muted">Richte deinen ersten ESP32 ein. Du brauchst dafür nur ein WLAN und etwa fünf Minuten. Oder probiere die App erst mit einem Demo-Gerät aus.</p><div class="row"><a class="btn" href="#/add">Gerät hinzufügen</a><button class="ghost" id="demo2" type="button">Demo-Gerät anlegen</button></div></div>`);
+  bindDemoBtn('#demo2');
+}
+// Demo-Gerät anlegen und direkt öffnen
+function bindDemoBtn(sel) {
+  const b = $(sel); if (!b) return;
+  b.onclick = async () => {
+    b.disabled = true;
+    try { const d = await Devices.createDemo('Demo-Gerät'); location.hash = '#/device/' + d.id; }
+    catch (e) { b.disabled = false; toast(e.message); }
+  };
 }
 
 // ---------- Gerät hinzufügen ----------
@@ -236,14 +378,14 @@ async function pageAdd() {
     </ol>
   </div>
   <p class="muted" style="max-width:640px">Warum nicht direkt hier? Diese App läuft über HTTPS, das Einrichtungs-WLAN des Geräts nur über HTTP. Der Browser blockiert diese Verbindung, deshalb läuft der WLAN-Schritt im Fenster des Geräts.</p>
-  ${DEMO ? `<div class="panel" style="margin-top:16px;max-width:520px"><h3>Demo</h3><p class="muted" style="margin:4px 0 12px">Ohne echtes Gerät kannst du die Kopplung simulieren.</p><button id="sim" class="ghost small">Gerät simulieren</button></div>` : ''}`;
+  <div class="panel" style="margin-top:16px;max-width:520px"><h3>Ohne Hardware ausprobieren</h3><p class="muted" style="margin:4px 0 12px">Das Demo-Gerät hat eine Anzeige, Licht und Lautsprecher und ist immer online. Du kannst alles einstellen und in der Vorschau sehen. Gesendet wird an keine echte Hardware. Löschen kannst du es jederzeit.</p><button id="sim" class="ghost small" type="button">Demo-Gerät anlegen</button></div>`;
   $('#gen').onclick = async () => {
     try {
       const { code, expires } = await Devices.createPairingCode();
       $('#codebox').innerHTML = `<div class="code" aria-label="Kopplungscode ${code.split('').join(' ')}">${code}</div><p class="hint">Gültig bis ${hhmm(expires)} Uhr</p>`;
     } catch (e) { toast('Code konnte nicht erzeugt werden: ' + e.message); }
   };
-  if (DEMO) $('#sim').onclick = async () => { const d = await Devices.simulateClaim('Neues Gerät'); location.hash = '#/device/' + d.id; };
+  bindDemoBtn('#sim');
 }
 
 // ---------- Ansagen: Regeln ----------
@@ -396,7 +538,7 @@ function fnItems(dev) {
 }
 
 function tabDirekt() {
-  const off = !DEMO && !isOnline(draft) ? '<p class="callout">Das Gerät ist gerade offline. Befehle kommen erst an, wenn es sich wieder meldet.</p>' : '';
+  const off = isDemoDev(draft) && !DEMO ? '<p class="callout">Demo-Gerät: Änderungen werden gespeichert, aber an keine Hardware gesendet.</p>' : !DEMO && !isOnline(draft) ? '<p class="callout">Das Gerät ist gerade offline. Befehle kommen erst an, wenn es sich wieder meldet.</p>' : '';
   return `${off}${fnItems(draft)}<p class="hint">Hier wirkt jede Änderung sofort. Sie wird auch dauerhaft gespeichert.</p>`;
 }
 
@@ -406,7 +548,8 @@ async function pageDirekt() {
   const devs = list.map(d => ({ ...d, config: normConfig(d.config) }));
   const lit = devs.filter(d => d.config.features.light);
   if (!devs.length) {
-    app.innerHTML = `<div class="pagehead"><h1>Direkt</h1></div><div class="panel empty"><h2>Noch kein Gerät</h2><p class="muted">Sobald du ein Gerät eingerichtet hast, bedienst du hier alles direkt.</p><a class="btn" href="#/add">Gerät hinzufügen</a></div>`;
+    app.innerHTML = `<div class="pagehead"><h1>Direkt</h1></div><div class="panel empty"><h2>Noch kein Gerät</h2><p class="muted">Sobald du ein Gerät eingerichtet hast, bedienst du hier alles direkt.</p><div class="row"><a class="btn" href="#/add">Gerät hinzufügen</a><button class="ghost" id="demo3" type="button">Demo-Gerät anlegen</button></div></div>`;
+    bindDemoBtn('#demo3');
     return;
   }
   app.innerHTML = `<div class="pagehead"><h1>Direkt</h1></div>
@@ -564,11 +707,11 @@ function bindFn(root, getDev) {
       const r = c.audio.rules[Number(el.dataset.i)];
       try {
         await Devices.command(dev.id, 'announce', { rule: r, volume: c.audio.volume });
-        if (DEMO) { mediaList = await Media.list(); await hearRule(r, c); toast('Demo: Die Ansage läuft in diesem Browser.'); } else toast('Ansage gesendet');
+        if (simulated(dev)) { mediaList = await Media.list(); await hearRule(r, c); toast('Demo: Die Ansage läuft in diesem Browser.'); } else toast('Ansage gesendet');
       } catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
     else if (d === 'refresh') el.onclick = async () => {
-      try { clearDepartureCache(); await Devices.command(dev.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(DEMO ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
+      try { clearDepartureCache(); await Devices.command(dev.id, 'refresh', { slot: Number(el.dataset.slot) }); toast(simulated(dev) ? 'Demo: Anzeige würde jetzt aktualisiert.' : 'Anzeige wird aktualisiert'); }
       catch (e) { toast('Senden nicht möglich: ' + e.message); }
     };
   });
@@ -666,7 +809,7 @@ function bindDevice() {
       if (!r.mediaId) { toast('Wähle zuerst eine MP3 oder die automatische Ansage.'); return; }
       try {
         await Devices.command(draft.id, 'announce', { rule: r, volume: draft.config.audio.volume });
-        if (DEMO) { await hearRule(r); toast('Demo: Die Ansage läuft in diesem Browser.'); }
+        if (simulated(draft)) { await hearRule(r); toast('Demo: Die Ansage läuft in diesem Browser.'); }
         else toast('Testansage an das Gerät gesendet');
       } catch (e) { toast('Senden nicht möglich: ' + e.message); }
     } else if (a === 'save') {

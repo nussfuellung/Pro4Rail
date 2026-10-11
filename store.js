@@ -20,21 +20,26 @@ export const defaultConfig = () => ({
   audio: { volume: 60, rules: [] },
 });
 
+// Beispielkonfiguration für Demo-Geräte: eine TFT-Anzeige mit Bahnhof, Licht und Lautsprecher.
+export const demoConfig = () => ({
+  ...defaultConfig(), demo: true,
+  displays: [{
+    slot: 1, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320 }, landscape: true,
+    seg: { kind: '7seg', driver: 'TM1637', digits: 4 },
+    content: 'abfahrt', station: { id: '8000105', name: 'Frankfurt(Main)Hbf' },
+    rows: 3, filter: '', imageId: null,
+  }],
+  light: { on: false, brightness: 100, dimmable: true },
+});
+const demoIds = new Set();   // Demo-Geräte (Supabase): Befehle gehen nicht an echte Hardware
+
 export async function initStore() {
   if (DEMO) {
     if (!LS.get('demo_devices')) {
       LS.set('demo_devices', [{
         id: uid(), name: 'Wohnzimmer (Demo)', device_uid: 'DEMO-0001',
         last_seen: new Date().toISOString(),
-        config: {
-          displays: [{
-            slot: 1, type: 'tft', tft: { model: 'ST7789', w: 240, h: 320 },
-            seg: { kind: '7seg', driver: 'TM1637', digits: 4 },
-            content: 'abfahrt', station: { id: '8000105', name: 'Frankfurt(Main)Hbf' },
-            rows: 2, filter: '', imageId: null,
-          }],
-          light: { on: false, brightness: 100 }, audio: { volume: 60, rules: [] },
-        },
+        config: demoConfig(),
       }]);
     }
     return;
@@ -44,25 +49,75 @@ export async function initStore() {
 }
 
 // ---------- Auth ----------
+// Beim Klick auf einen Link aus einer E-Mail landet man mit Daten im Adressteil (#...) in der App. Das lesen wir einmal
+// aus, bevor Supabase und der Router es verbrauchen: type=signup/recovery bei Erfolg, error_code bei abgelaufenem Link.
+const linkIntent = (() => {
+  try {
+    if (!location.hash || location.hash.startsWith('#/')) return null;
+    const q = new URLSearchParams(location.hash.slice(1));
+    if (q.get('error') || q.get('error_code')) return { kind: 'error', code: q.get('error_code') || q.get('error') };
+    if (q.get('type') === 'recovery') return { kind: 'recovery' };
+    if (q.get('type') === 'signup' || q.get('type') === 'email_change' || q.get('type') === 'invite') return { kind: 'confirmed' };
+  } catch { /* egal */ }
+  return null;
+})();
+
+// Adresse, auf die der Link in der E-Mail zurückführt. Muss in Supabase unter Redirect URLs erlaubt sein.
+const redirectUrl = () => (CONFIG.SITE_URL || (location.origin + location.pathname)).replace(/#.*$/, '').replace(/index\.html$/, '');
+
+export function authMessage(e) {
+  const code = e?.code || '', msg = String(e?.message || e || '');
+  if (code === 'invalid_credentials' || /Invalid login credentials/i.test(msg)) return 'E-Mail oder Passwort stimmen nicht.';
+  if (code === 'email_not_confirmed' || /not confirmed/i.test(msg)) return 'Diese E-Mail-Adresse ist noch nicht bestätigt. Öffne den Link in der Bestätigungsmail.';
+  if (code === 'user_already_exists' || /already registered/i.test(msg)) return 'Zu dieser E-Mail-Adresse gibt es schon ein Konto.';
+  if (code === 'weak_password' || /Password should be/i.test(msg)) return 'Das Passwort ist zu schwach. Nimm mindestens 8 Zeichen, am besten mit Zahlen oder Sonderzeichen.';
+  if (code === 'same_password' || /different from the old/i.test(msg)) return 'Das neue Passwort muss sich vom alten unterscheiden.';
+  if (code === 'signup_disabled' || /signups? (are|is) disabled/i.test(msg)) return 'Neue Registrierungen sind zurzeit ausgeschaltet.';
+  if (code === 'validation_failed' || code === 'email_address_invalid' || /invalid.*email|email.*invalid/i.test(msg)) return 'Diese E-Mail-Adresse wird nicht akzeptiert. Prüfe die Schreibweise.';
+  if (code === 'over_email_send_rate_limit' || code === 'over_request_rate_limit' || /rate limit|too many/i.test(msg)) return 'Zu viele Versuche. Bitte warte einige Minuten und probiere es dann noch einmal.';
+  if (code === 'session_not_found' || code === 'refresh_token_not_found' || /session/i.test(msg) && /missing|expired|not found/i.test(msg)) return 'Die Sitzung ist abgelaufen. Fordere einen neuen Link an.';
+  if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) return 'Keine Verbindung zu Supabase. Prüfe die Internetverbindung.';
+  return msg || 'Das hat nicht geklappt.';
+}
+const wrap = async fn => { try { return await fn(); } catch (e) { throw Object.assign(new Error(authMessage(e)), { code: e?.code }); } };
+
 export const Auth = {
+  intent: linkIntent,
+  recovery: linkIntent?.kind === 'recovery',   // true, solange das neue Passwort noch nicht gesetzt ist
   async user() {
     if (DEMO) return { id: 'demo', email: 'demo@lokal' };
     const { data } = await sb.auth.getSession();
     return data.session?.user ?? null;
   },
-  async signIn(email, password) {
-    if (DEMO) return;
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  },
   async signUp(email, password) {
-    if (DEMO) return;
-    const { data, error } = await sb.auth.signUp({ email, password });
-    if (error) throw error;
-    return data;
+    if (DEMO) return { status: 'signedIn' };
+    return wrap(async () => {
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectUrl() } });
+      if (error) throw error;
+      // Ist die E-Mail schon bestätigt vergeben, meldet Supabase keinen Fehler, liefert aber einen Benutzer ohne Identitäten.
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) return { status: 'exists' };
+      return { status: data.session ? 'signedIn' : 'confirm' };
+    }).catch(e => { if (e.code === 'user_already_exists') return { status: 'exists' }; throw e; });
   },
-  async signOut() { if (!DEMO) await sb.auth.signOut(); },
-  onChange(cb) { if (!DEMO) sb.auth.onAuthStateChange(() => cb()); },
+  async resend(email) {
+    if (DEMO) return;
+    await wrap(async () => { const { error } = await sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirectUrl() } }); if (error) throw error; });
+  },
+  async resetPassword(email) {
+    if (DEMO) return;
+    await wrap(async () => { const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl() }); if (error) throw error; });
+  },
+  async setPassword(password) {
+    if (DEMO) return;
+    await wrap(async () => { const { error } = await sb.auth.updateUser({ password }); if (error) throw error; });
+    Auth.recovery = false;
+  },
+  async signOut() { Auth.recovery = false; if (!DEMO) await sb.auth.signOut(); },
+  onChange(cb) { if (!DEMO) sb.auth.onAuthStateChange(ev => { if (ev === 'PASSWORD_RECOVERY') Auth.recovery = true; cb(); }); },
+};
+Auth.signIn = async (email, password) => {
+  if (DEMO) return;
+  await wrap(async () => { const { error } = await sb.auth.signInWithPassword({ email, password }); if (error) throw error; });
 };
 
 // ---------- Geräte ----------
@@ -71,6 +126,19 @@ export const Devices = {
     if (DEMO) return LS.get('demo_devices', []);
     const { data, error } = await sb.from('devices').select('*').order('created_at');
     if (error) throw error;
+    demoIds.clear(); data.forEach(d => { if (d.config?.demo) demoIds.add(d.id); });
+    return data;
+  },
+  // Legt ein Demo-Gerät an (zum Ausprobieren ohne Hardware). Es ist immer "online", Befehle werden nicht verschickt.
+  async createDemo(name = 'Demo-Gerät') {
+    if (DEMO) return Devices.simulateClaim(name);
+    const u = await Auth.user();
+    const row = { owner: u.id, name, device_uid: 'DEMO-' + Math.random().toString(16).slice(2, 8).toUpperCase(), config: demoConfig(), last_seen: new Date().toISOString() };
+    const { data, error } = await sb.from('devices').insert(row).select().single();
+    if (error) {
+      if (error.code === '42501' || /row-level security/i.test(error.message)) throw new Error('Die Datenbank erlaubt noch keine Demo-Geräte. Führe das aktuelle supabase/schema.sql einmal im SQL Editor aus.');
+      throw error;
+    }
     return data;
   },
   async save(d) {
@@ -103,7 +171,7 @@ export const Devices = {
     const all = LS.get('demo_devices', []);
     const d = {
       id: uid(), name, device_uid: 'DEMO-' + Math.random().toString(16).slice(2, 8).toUpperCase(),
-      last_seen: new Date().toISOString(), config: defaultConfig(),
+      last_seen: new Date().toISOString(), config: name === 'Neues Gerät' ? defaultConfig() : demoConfig(),
     };
     all.push(d); LS.set('demo_devices', all);
     return d;
@@ -126,6 +194,7 @@ export const Devices = {
     if (up.error) throw up.error;
   },
   async command(deviceId, type, payload = {}) {
+    if (!DEMO && demoIds.has(deviceId)) return;   // Demo-Gerät: nichts senden
     if (DEMO) { LS.set('demo_last_cmd', { deviceId, type, payload, at: Date.now() }); return; }
     const { error } = await sb.from('commands').insert({ device_id: deviceId, type, payload });
     if (error) throw error;

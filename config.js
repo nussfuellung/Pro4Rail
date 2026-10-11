@@ -3,6 +3,10 @@
 // Solange beides leer ist, läuft die App im Demo-Modus (Daten nur lokal im Browser).
 export const CONFIG = {
   SUPABASE_URL: 'https://uzvhwhzrsaylblkavroe.supabase.co',
+  // Adresse dieser App (GitHub Pages), auf die Links in Bestätigungs- und Passwort-Mails zurückführen, zum Beispiel
+  // 'https://DEINNAME.github.io/REPO/'. Leer lassen: Die Adresse, unter der die App gerade geöffnet ist. In Supabase muss sie
+  // unter Authentication > URL Configuration als Redirect URL stehen (und als Site URL, sonst landen Links auf localhost:3000).
+  SITE_URL: '',
   SUPABASE_ANON_KEY: 'sb_publishable_XvjxV2ZsrkN-tPZt032MlA_8lRWvXc1',
   // Fahrplandaten (Haltestellensuche und Abfahrten).
   // 'transitous': offene Schnittstelle der Transitous-Gemeinschaft, ohne Schlüssel (https://transitous.org/api/).
