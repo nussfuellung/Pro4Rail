@@ -67,16 +67,18 @@ function fromDbRest(j) {
 export const normalize = { transitous: fromTransitous, dbrest: fromDbRest };
 
 // station: { id, name }
-export async function getDepartures(station, f = fetch) {
-  const key = CONFIG.DATA_SOURCE + ':' + station.id;
+// n: wie viele Abfahrten gelesen werden. Wer nach Gleis filtert (Zugzielanzeiger), braucht viele, weil an großen Bahnhöfen
+// die nächsten 15 Abfahrten oft nur wenige Minuten abdecken und ein bestimmtes Gleis darin leer sein kann.
+export async function getDepartures(station, f = fetch, n = 15) {
+  const key = CONFIG.DATA_SOURCE + ':' + station.id + ':' + n;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.data;
   let data;
   if (CONFIG.DATA_SOURCE === 'dbrest') {
-    data = fromDbRest(await getJson(`${base()}/stops/${encodeURIComponent(station.id)}/departures?duration=120&results=12`, f));
+    data = fromDbRest(await getJson(`${base()}/stops/${encodeURIComponent(station.id)}/departures?duration=${n > 15 ? 240 : 120}&results=${n > 15 ? 80 : 12}`, f));
   } else {
     const id = await transitousId(station, f);
-    data = fromTransitous(await getJson(`${base()}${CONFIG.STOPTIMES_PATH}?stopId=${encodeURIComponent(id)}&n=15`, f));
+    data = fromTransitous(await getJson(`${base()}${CONFIG.STOPTIMES_PATH}?stopId=${encodeURIComponent(id)}&n=${n}`, f));
   }
   cache.set(key, { t: Date.now(), data });
   return data;

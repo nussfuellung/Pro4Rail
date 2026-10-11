@@ -84,11 +84,19 @@ export function pinSets(config) {
     rows: [pwr('5V', 'VIN', '', ''), pwr('GND', 'GND', '', ''), io(B.audio.bclk, 'BCLK', '', ''), io(B.audio.lrc, 'LRC', 'auch WS', ''), io(B.audio.din, 'DIN', '', '')],
     notes: ['SD und GAIN offen lassen.'],
   });
-  if (on('light')) sets.push({
-    title: 'Beleuchtung',
-    sub: config.light?.dimmable === false ? 'Ein Ausgang zum Schalten, zum Beispiel für ein Relais oder ein MOSFET-Modul.' : 'Ein Ausgang für ein MOSFET-Modul (dimmbar per PWM) oder einen WS2812-Streifen.',
-    rows: [pwr('GND', 'GND', 'gemeinsame Masse mit der Lichtversorgung', ''), io(B.light, 'Signal', 'Gate des MOSFET oder DIN des Streifens', '')],
-    notes: ['Das Licht bekommt eine eigene Spannungsversorgung. Nicht über den ESP32 speisen.'],
-  });
+  if (on('light')) {
+    const relay = config.light?.dimmable === false;
+    sets.push(relay ? {
+      title: 'Beleuchtung: Relaismodul',
+      sub: 'Ein Ausgang schaltet das Relais (An und Aus). Das Licht hängt an den Kontakten des Relais, nicht am ESP32.',
+      rows: [pwr('5V', 'VCC', 'bei den meisten Relaismodulen 5V', ''), pwr('GND', 'GND', '', ''), io(B.light, 'IN', 'auch S oder Signal', '')],
+      notes: ['Schaltet das Licht verkehrt herum, aktiviere im Reiter Gerät „Relais schaltet bei LOW“. Manche Module brauchen für den Eingang 5V. Dann ein Modul mit Optokoppler oder Pegelwandler nehmen.', 'Das Licht bekommt seine eigene Spannungsversorgung über die Relaiskontakte (COM und NO).'],
+    } : {
+      title: 'Beleuchtung: MOSFET-Modul',
+      sub: 'Ein Ausgang für ein MOSFET-Modul (dimmbar per PWM).',
+      rows: [pwr('GND', 'GND', 'gemeinsame Masse mit der Lichtversorgung', ''), io(B.light, 'Signal', 'Gate des MOSFET', '')],
+      notes: ['Das Licht bekommt eine eigene Spannungsversorgung. Nicht über den ESP32 speisen.'],
+    });
+  }
   return sets;
 }

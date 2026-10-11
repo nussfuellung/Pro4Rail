@@ -123,7 +123,7 @@ async function previewHtml(disp) {
   if (disp.content === 'zugziel' && !String(disp.platform || '').trim()) return note('Gib das Gleis ein, dann erscheint hier die Vorschau.');
   if (!disp.station) return note('Wähle einen Bahnhof, dann erscheint hier die Live-Vorschau.');
   try {
-    const list = applyFilter(await getDepartures(disp.station), disp.filter);
+    const list = applyFilter(await getDepartures(disp.station, fetch, disp.content === 'zugziel' ? 60 : 15), disp.filter);
     if (!list.length && disp.content !== 'zugziel') return note('Keine Abfahrten gefunden. Prüfe den Linienfilter.');
     if (disp.content === 'zugziel') {
       const onPlat = list.filter(d => platformMatches(d.platform, disp.platform));
@@ -674,8 +674,10 @@ function tabGeraet() {
       <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder OLED-Anzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
         <div class="fn"><div class="fn-main"><b>${t}</b><small>${s}</small></div>
           <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>${k === 'light' && feat('light') ? `
-        <div class="fn sub"><div class="fn-main"><b>Dimmbar</b><small>Nur einschalten, wenn das Licht stufenlos regelbar ist. Sonst gibt es nur An und Aus.</small></div>
-          <label class="switch"><input type="checkbox" data-k="config.light.dimmable" data-rerender aria-label="Licht dimmbar" ${draft.config.light.dimmable !== false ? 'checked' : ''}><span class="tr"></span></label></div>` : ''}`).join('')}</div></section>
+        <div class="fn sub"><div class="fn-main"><b>Art des Lichts</b><small>Relais oder Schalter: nur An und Aus. MOSFET-Modul: stufenlos dimmbar.</small></div>
+          ${sel('config.light.dimmable', String(draft.config.light.dimmable !== false), [['false', 'Relais (An und Aus)'], ['true', 'MOSFET (dimmbar)']], 'data-bool data-rerender')}</div>${draft.config.light.dimmable === false ? `
+        <div class="fn sub"><div class="fn-main"><b>Relais schaltet bei LOW</b><small>Viele Relaismodule schalten, wenn der Eingang auf LOW geht (Low-Level-Trigger). Schaltet dein Licht verkehrt herum, aktiviere das.</small></div>
+          <label class="switch"><input type="checkbox" data-k="config.light.invert" data-rerender aria-label="Relais schaltet bei LOW" ${draft.config.light.invert ? 'checked' : ''}><span class="tr"></span></label></div>` : ''}` : ''}`).join('')}</div></section>
     <section class="section" style="margin-top:32px;max-width:560px"><h2>Gerät entkoppeln</h2>
       <p class="muted">Das Gerät verschwindet aus deinem Konto und muss danach neu eingerichtet werden.</p>
       <button type="button" class="danger" data-act="del">Gerät entkoppeln</button></section>`;
@@ -924,7 +926,7 @@ async function pageInstaller() {
     </div>
     <div class="callout warn" style="margin-top:20px;max-width:640px"><p><strong>Welcher ESP32?</strong> Der Installer erkennt den Chip selbst und spielt die passende Firmware auf. Unterstützt sind der ESP32-S3 (empfohlen) und der normale ESP32, zum Beispiel WROOM-32.</p>
       <p>Ein normaler ESP32 hat weniger Pins und weniger Rechenleistung. Mit mehr als einer Anzeige kann die Darstellung ruckeln, besonders zusammen mit Ansagen. Mehr als zwei Anzeigen sind damit nicht möglich. Wähle danach am Gerät im Reiter Gerät das passende Board.</p></div>
-    <div class="callout" style="margin-top:12px;max-width:640px"><p>Die Firmware-Dateien <strong>install/firmware.bin</strong> (ESP32-S3) und <strong>install/firmware-esp32.bin</strong> (ESP32) gibt es noch nicht. Sie entstehen mit der Firmware und werden danach in diesen Ordner gelegt.</p></div>`;
+    <div class="callout" style="margin-top:12px;max-width:640px"><p><strong>Nach dem Aufspielen:</strong> Das Gerät öffnet ein WLAN-Netz namens <strong>Pro4Rail-Setup-XXXX</strong>. Verbinde dich damit, wähle dein WLAN und gib den Kopplungscode aus der App ein (Geräte, Gerät hinzufügen). Mit gedrückter BOOT-Taste beim Einschalten (5 Sekunden) werden WLAN und Kopplung gelöscht.</p></div>`;
   if (!customElements.get('esp-web-install-button')) {
     try { await import('https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module'); }
     catch { toast('Die Installer-Bibliothek konnte nicht geladen werden.'); }

@@ -64,8 +64,10 @@ export const ZZA = { frame: '#141a3a', bg: '#0e4fd0', seam: 'rgba(5,12,50,.55)',
 
 // Gleis passt: "3" trifft 3, 3a und "3 A-D", aber nicht 13. Mehrere Gleise mit Komma: "3,4".
 export function platformMatches(platform, wanted) {
-  const p = String(platform ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return String(wanted ?? '').toLowerCase().split(/[,;]+/).map(x => x.trim()).filter(Boolean)
+  // Vorsilben wie "Gleis 3" oder "Bahnsteig 3" zählen nicht mit
+  const norm = x => String(x ?? '').toLowerCase().replace(/\b(gleis|bahnsteig|steig|platform|track)\b\.?/g, '').replace(/\s+/g, ' ').trim();
+  const p = norm(platform);
+  return String(wanted ?? '').split(/[,;]+/).map(norm).filter(Boolean)
     .some(t => p === t || (p.startsWith(t) && !/\d/.test(p[t.length] || '')));
 }
 
@@ -93,7 +95,7 @@ export function zugzielScreen({ tft, platform = '', dep = null, now = new Date()
   const bh = Math.min(h, Math.round(w / 2.05)), top = Math.round((h - bh) / 2);
   const p = Math.max(3, Math.round(w / 64)), rh = Math.floor((bh - 3 * p) / 2), rw = w - 2 * p;
   const fs = v => Math.max(8, Math.round(v * rh));
-  const A = Math.round(rw * .2), B = Math.round(rw * .6), C = rw - A - B;
+  const A = Math.round(rw * .2), B = Math.round(rw * .48), C = rw - A - B;   // gleiche Aufteilung wie die Firmware (Punktschrift braucht rechts mehr Platz)
   const seams = [20, 40, 60, 80].map(x => `<i class="zs" style="left:${x}%"></i>`).join('');
   const msg = zzaNotice(dep);
   const stripH = Math.round(rh * .3), viaFs = fs(.22);
@@ -103,7 +105,7 @@ export function zugzielScreen({ tft, platform = '', dep = null, now = new Date()
   const abs = (l, t2, wd, hd, inner, cls = '') => `<div class="za ${cls}" style="left:${l}px;top:${t2}px;width:${wd}px;height:${hd}px">${inner}</div>`;
   const mq = (txt, size, cls = '') => `<div class="mq ${cls}" style="font-size:${size}px;line-height:${Math.round(size * 1.15)}px"><span>${esc(txt)}</span></div>`;
   const row1 = `<div class="zrow" style="left:${p}px;top:${p}px;width:${rw}px;height:${rh}px">${seams}
-    ${abs(Math.round(rw * .03), 0, A - 2, rh, `<b class="zgl" style="font-size:${fs(gl.length > 2 ? .55 : .86)}px">${esc(gl)}</b>`, 'v')}
+    ${abs(Math.round(rw * .03), 0, A - 2, rh, `<b class="zgl" style="font-size:${fs(gl.length > 1 ? .55 : .86)}px">${esc(gl)}</b>`, 'v')}
     ${msg ? abs(A, Math.round(rh * .04), B, stripH, mq(msg, fs(.2)), 'zstrip') : ''}
     ${lines.map((l, i) => abs(A + 4, Math.round(rh * .04) + stripH + Math.round(rh * .06) + i * Math.round(viaFs * 1.3), B - 8, Math.round(viaFs * 1.2), mq(l, viaFs))).join('')}
     ${abs(A + B, 0, C - Math.round(rw * .02), rh, `<b class="ztime" style="font-size:${fs(.34)}px;${dep?.cancelled ? 'text-decoration:line-through;opacity:.7' : ''}">${t}</b>${dep ? `<b class="ztrain" style="font-size:${fs(.2)}px">${esc(dep.line)}</b>` : ''}`, 'r v')}

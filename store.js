@@ -17,7 +17,7 @@ export const defaultConfig = () => ({
   board: 'esp32s3',
   features: { displays: true, light: true, audio: true },
   displays: [],
-  light: { on: false, brightness: 100, dimmable: true },
+  light: { on: false, brightness: 100, dimmable: true, invert: false },
   audio: { volume: 60, rules: [] },
 });
 
@@ -33,7 +33,7 @@ export const demoConfig = () => ({
     slot: 2, type: 'oled', tft: { model: 'ST7789', w: 240, h: 320, landscape: true }, oled: { ...OLED_DEFAULT },
     content: 'abfahrt', station: { id: '8000105', name: 'Frankfurt(Main)Hbf' }, rows: 2, filter: '', platform: '', imageIds: [], interval: 10,
   }],
-  light: { on: false, brightness: 100, dimmable: true },
+  light: { on: false, brightness: 100, dimmable: true, invert: false },
 });
 const demoIds = new Set();   // Demo-Geräte (Supabase): Befehle gehen nicht an echte Hardware
 
