@@ -20,13 +20,15 @@ static std::shared_ptr<Config> parse(JsonVariantConst j) {
   auto c = std::make_shared<Config>();
   JsonVariantConst f = j["features"];
   c->fDisplays = f["displays"] | true; c->fLight = f["light"] | true; c->fAudio = f["audio"] | true;
+  c->muxOn = c->fDisplays && (j["mux"]["on"] | false); c->muxManual = j["mux"]["manual"] | false;
+  { int a = j["mux"]["addr"] | 0x70; c->muxAddr = a >= 0x70 && a <= 0x77 ? a : 0x70; } c->muxSda = j["mux"]["sda"] | -1; c->muxScl = j["mux"]["scl"] | -1;
   c->lightOn = j["light"]["on"] | false; c->brightness = clampInt(j["light"]["brightness"], 0, 100, 100); c->dimmable = j["light"]["dimmable"] | true; c->lightInvert = j["light"]["invert"] | false;
   c->volume = clampInt(j["audio"]["volume"], 0, 100, 60);
   for (JsonVariantConst d : j["displays"].as<JsonArrayConst>()) {
     DisplayCfg x; x.slot = clampInt(d["slot"], 1, P4R_MAX_DISPLAYS, 1);
     std::string type = str(d["type"], "tft"); x.oled = (type == "oled" || type == "seg");   // "seg" war die frühere Segmentanzeige
     x.tftModel = str(d["tft"]["model"], "ST7789"); x.landscape = !(d["tft"]["landscape"].is<bool>() && d["tft"]["landscape"].as<bool>() == false);   // wie screenSize in tft.js: nur ein ausdrückliches false ist Hochformat
-    x.oledModel = str(d["oled"]["model"], "SSD1306_32"); x.oledRight = str(d["oled"]["right"], "min"); x.oledHeader = d["oled"]["header"] | true;
+    x.oledModel = str(d["oled"]["model"], "SSD1306_32"); x.oledRight = str(d["oled"]["right"], "min"); x.oledHeader = d["oled"]["header"] | true; x.muxCh = d["oled"]["channel"] | -1;
     x.content = str(d["content"], "abfahrt");
     if (x.oled && x.content != "uhr") x.content = "abfahrt";          // OLED kennt nur Abfahrten und Uhr
     if (!x.oled && x.content != "abfahrt" && x.content != "zugziel" && x.content != "uhr" && x.content != "bild") x.content = "abfahrt";

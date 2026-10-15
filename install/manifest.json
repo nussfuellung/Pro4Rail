@@ -1,6 +1,6 @@
 {
   "name": "Pro4Rail Firmware",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "new_install_prompt_erase": true,
   "builds": [
     {

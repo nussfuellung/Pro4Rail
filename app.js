@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import { OLED_MODELS, OLED_COLORS, OLED_DEFAULT, oledSize, oledDepartureScreen, oledClockScreen } from './oled.js';
 import { DEMO, initStore, Auth, Devices, Media, defaultConfig, uid } from './store.js';
-import { pinSets, BOARDS, boardOf, boardWarnings } from './pins.js';
+import { pinSets, BOARDS, boardOf, boardWarnings, muxPlan, muxOn, maxDisplays, busPinChoices, MUX_MAX } from './pins.js';
 import { searchStations, getDepartures, clearDepartureCache } from './transport.js';
 import { TFT_MODELS, screenSize, departureScreen, clockScreen, imageScreen, zugzielScreen, platformMatches } from './tft.js';
 import { activateMarquee, activateSlides } from './marquee.js';
@@ -368,7 +368,7 @@ async function pageAdd() {
     <ol class="steps">
       <li><div><h3>Firmware installieren</h3><p class="muted" style="margin:2px 0 8px">Nur bei einem neuen ESP32 ohne Pro4Rail-Firmware nötig. Der Installer arbeitet per USB am Computer.</p><a class="btn ghost small desktop-only" href="#/installer">Zum Installer</a><p class="muted desktop-hint">Der Installer funktioniert nur am Computer mit Chrome oder Edge.</p></div></li>
       <li><div><h3>Kopplungscode erzeugen</h3><p class="muted" style="margin:2px 0 8px">Der Code gilt 15 Minuten und nur für ein Gerät.</p><button id="gen" class="small">Code erzeugen</button><div id="codebox" style="margin-top:14px"></div></div></li>
-      <li><div><h3>Mit dem WLAN des Geräts verbinden</h3><p class="muted" style="margin:2px 0 0">Der ESP32 öffnet nach dem Einschalten ein WLAN mit dem Namen Rail4Pro und vier Zeichen dahinter. Verbinde dein Handy damit. Das Einrichtungsfenster öffnet sich von selbst, sonst rufst du <strong>192.168.4.1</strong> im Browser auf.</p></div></li>
+      <li><div><h3>Mit dem WLAN des Geräts verbinden</h3><p class="muted" style="margin:2px 0 0">Der ESP32 öffnet nach dem Einschalten ein WLAN mit dem Namen Tafel und vier Zeichen dahinter. Verbinde dein Handy damit. Das Einrichtungsfenster öffnet sich von selbst, sonst rufst du <strong>192.168.4.1</strong> im Browser auf.</p></div></li>
       <li><div><h3>WLAN und Code eingeben</h3><p class="muted" style="margin:2px 0 0">Wähle dein Heimnetz, gib das Passwort und den Kopplungscode ein und speichere. Danach erscheint das Gerät in deiner Liste.</p></div></li>
     </ol>
   </div>
@@ -604,7 +604,8 @@ function tabAnzeigen() {
         <label class="field"><span class="lbl">Bauart</span>${sel(`${p}.type`, d.type, [['tft', 'TFT-Display'], ['oled', 'OLED-Textdisplay (I²C)']], 'data-rerender')}</label>
         ${isOled ? `
           <label class="field"><span class="lbl">Modell</span>${sel(`${p}.oled.model`, d.oled.model, Object.entries(OLED_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
-          <label class="field"><span class="lbl">Farbe der Pixel</span>${sel(`${p}.oled.color`, d.oled.color, Object.entries(OLED_COLORS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>` : `
+          <label class="field"><span class="lbl">Farbe der Pixel</span>${sel(`${p}.oled.color`, d.oled.color, Object.entries(OLED_COLORS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
+          ${muxOn(c) && c.mux.manual ? `<label class="field"><span class="lbl">Kanal am Multiplexer</span>${sel(`${p}.oled.channel`, muxPlan(c).channels[d.slot] ?? 0, Array.from({ length: MUX_MAX }, (_, n) => [n, `Kanal ${n} (SD${n} und SC${n})`]), 'data-num data-rerender')}</label>` : ''}` : `
           <label class="field"><span class="lbl">Modell</span>${sel(`${p}.tft.model`, d.tft.model, Object.entries(TFT_MODELS).map(([k, v]) => [k, v.label]), 'data-rerender')}</label>
           <label class="field"><span class="lbl">Ausrichtung</span>${sel(`${p}.tft.landscape`, String(d.tft.landscape !== false), [['true', 'Querformat (wie eine Bahnhofstafel)'], ['false', 'Hochformat']], 'data-bool data-rerender')}</label>`}
         <label class="field"><span class="lbl">Inhalt</span>${sel(`${p}.content`, d.content, Object.entries(CONTENT[d.type]), 'data-rerender')}</label>
@@ -624,10 +625,10 @@ function tabAnzeigen() {
       <div class="row disp-foot"><button type="button" class="small" data-act="bigprev" data-i="${i}">Vorschau</button><button type="button" class="ghost small" data-act="topins">Anschlüsse</button><button type="button" class="danger small" data-act="rm" data-i="${i}">Entfernen</button></div>
     </details>`;
   }).join('');
-  const maxD = boardOf(c).maxDisplays;
+  const maxD = maxDisplays(c);
   const add = c.displays.length < maxD
     ? `<button type="button" class="${c.displays.length ? 'ghost' : ''}" data-act="add">Anzeige hinzufügen</button>`
-    : `<p class="muted">Dieses Board unterstützt höchstens ${maxD} Anzeigen.</p>`;
+    : `<p class="muted">${muxOn(c) ? `Mit dem Multiplexer sind höchstens ${maxD} Anzeigen möglich.` : `Dieses Board unterstützt höchstens ${maxD} Anzeigen. Mit einem Multiplexer (Reiter Gerät) sind bis zu ${MUX_MAX} OLED-Anzeigen möglich.`}</p>`;
   return warnHtml() + (blocks || `<div class="panel empty" style="margin-bottom:16px"><h2>Noch keine Anzeige</h2><p class="muted">Füge die erste Anzeige hinzu und wähle, ob ein TFT oder ein OLED-Textdisplay angeschlossen ist.</p></div>`) + add;
 }
 
@@ -658,12 +659,32 @@ const warnHtml = () => boardWarnings(draft.config).map(w => `<p class="callout w
 
 function tabPins() {
   const sets = pinSets(draft.config).map(s => `<section class="pinset"><h3>${esc(s.title)}</h3><p class="muted">${esc(s.sub)}</p>
-    <div class="pins"><div class="pin head muted"><span>ESP32</span><span></span><span>Pin am Modul</span></div>
-      ${s.rows.map(r => `<div class="pin"><span class="gpio ${r.pwr ? 'pwr' : ''}">${esc(r.gpio)}</span><span class="track"></span>
+    <div class="pins"><div class="pin head muted"><span>Pin am ESP32</span><span></span><span>Beschriftung am Modul</span></div>
+      ${s.rows.map(r => `<div class="pin"><span class="gpio ${r.pwr ? 'pwr' : ''}">${/^\d+$/.test(String(r.gpio)) ? 'GPIO ' : ''}${esc(r.gpio)}</span><span class="track"></span>
         <span class="mod"><b>${esc(r.mod)}</b>${r.alt || r.note ? `<small>${[r.alt, r.note].filter(Boolean).map(esc).join(', ')}</small>` : ''}</span></div>`).join('')}
     </div>${s.notes.map(n => `<p class="hint">${esc(n)}</p>`).join('')}</section>`).join('');
   const B = boardOf(draft.config);
   return `<div class="callout"><p><strong>${esc(B.name)}</strong></p><p>${esc(B.warning)}</p></div>${warnHtml()}${sets}`;
+}
+
+// Multiplexer TCA9548A: mehr als zwei OLEDs an zwei Pins. Die Belegung ergibt sich von selbst und lässt sich bei Bedarf selbst festlegen.
+function muxRows() {
+  const c = draft.config; c.mux = { on: false, manual: false, addr: 0x70, sda: null, scl: null, ...(c.mux || {}) };
+  const on = muxOn(c); const plan = muxPlan(c);
+  let h = `<div class="fn sub"><div class="fn-main"><b>Multiplexer TCA9548A</b><small>Ein kleines Zusatzmodul, an dem bis zu ${MUX_MAX} OLED-Anzeigen an nur zwei Pins hängen. Ohne Multiplexer sind höchstens zwei OLEDs möglich.</small></div>
+    <label class="switch"><input type="checkbox" data-k="config.mux.on" data-rerender aria-label="Multiplexer verbaut" ${c.mux.on ? 'checked' : ''}><span class="tr"></span></label></div>`;
+  if (!on) return h;
+  h += `<div class="fn sub"><div class="fn-main"><b>Belegung selbst festlegen</b><small>Normalerweise ergibt sich alles von selbst: Adresse 0x70, die Pins ${plan.manual ? '' : `GPIO ${plan.sda} und ${plan.scl}, `}und Kanal 0, 1, 2 … in der Reihenfolge der Anzeigen. Nur ändern, wenn dein Aufbau anders verdrahtet ist.</small></div>
+    <label class="switch"><input type="checkbox" data-k="config.mux.manual" data-rerender aria-label="Belegung selbst festlegen" ${c.mux.manual ? 'checked' : ''}><span class="tr"></span></label></div>`;
+  if (c.mux.manual) {
+    const pins = busPinChoices(c).map(g => [g, `GPIO ${g}`]);
+    h += `<div class="fn sub"><div class="fn-main"><b>Adresse und Pins</b><small>Adresse des Multiplexers (Werkseinstellung 0x70) und die zwei Pins am ESP32. Den Kanal jeder OLED wählst du in der jeweiligen Anzeige.</small></div>
+      <div class="grid" style="min-width:min(100%,340px)">
+        <label class="field"><span class="lbl">Adresse</span>${sel('config.mux.addr', plan.addr, Array.from({ length: 8 }, (_, i) => [0x70 + i, '0x' + (0x70 + i).toString(16).toUpperCase()]), 'data-num data-rerender')}</label>
+        <label class="field"><span class="lbl">SDA</span>${sel('config.mux.sda', plan.sda, pins, 'data-num data-rerender')}</label>
+        <label class="field"><span class="lbl">SCL</span>${sel('config.mux.scl', plan.scl, pins, 'data-num data-rerender')}</label></div></div>`;
+  }
+  return h;
 }
 
 function tabGeraet() {
@@ -675,7 +696,7 @@ function tabGeraet() {
       <p class="muted">Schalte ab, was an diesem Gerät nicht verbaut ist. Die Funktion verschwindet aus der App und braucht keine Anschlüsse. Einstellungen bleiben erhalten.</p>
       <div class="panel fnlist">${[['displays', 'Anzeigen', 'TFT oder OLED-Anzeigen'], ['audio', 'Lautsprecher', 'Ansagen und Lautstärke'], ['light', 'Beleuchtung', 'Schaltbares Licht']].map(([k, t, s]) => `
         <div class="fn"><div class="fn-main"><b>${t}</b><small>${s}</small></div>
-          <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>${k === 'light' && feat('light') ? `
+          <label class="switch"><input type="checkbox" data-k="config.features.${k}" data-rerender aria-label="${t} verbaut" ${feat(k) ? 'checked' : ''}><span class="tr"></span></label></div>${k === 'displays' && feat('displays') ? muxRows() : ''}${k === 'light' && feat('light') ? `
         <div class="fn sub"><div class="fn-main"><b>Art des Lichts</b><small>Relais oder Schalter: nur An und Aus. MOSFET-Modul: stufenlos dimmbar.</small></div>
           ${sel('config.light.dimmable', String(draft.config.light.dimmable !== false), [['false', 'Relais (An und Aus)'], ['true', 'MOSFET (dimmbar)']], 'data-bool data-rerender')}</div>${draft.config.light.dimmable === false ? `
         <div class="fn sub"><div class="fn-main"><b>Relais schaltet bei LOW</b><small>Viele Relaismodule schalten, wenn der Eingang auf LOW geht (Low-Level-Trigger). Schaltet dein Licht verkehrt herum, aktiviere das.</small></div>
@@ -820,8 +841,10 @@ function bindDevice() {
     const rules = draft.config.audio.rules;
     if (a === 'add') {
       const used = draft.config.displays.map(d => d.slot);
-      const slot = [1, 2, 3].slice(0, boardOf(draft.config).maxDisplays).find(s => !used.includes(s));
-      draft.config.displays.push(newDisplay(slot)); openDisp.add(slot); markDirty(); renderDevice();
+      const slot = Array.from({ length: maxDisplays(draft.config) }, (_, n) => n + 1).find(s => !used.includes(s));
+      const nd = newDisplay(slot);
+      if (muxOn(draft.config) && draft.config.displays.filter(x => x.type !== 'oled').length >= boardOf(draft.config).maxDisplays) nd.type = 'oled', nd.content = 'abfahrt';   // TFT-Plätze sind belegt, mit dem Multiplexer geht eine OLED
+      draft.config.displays.push(nd); openDisp.add(slot); markDirty(); renderDevice();
     } else if (a === 'rm') {
       const slot = draft.config.displays[i].slot;
       draft.config.displays.splice(i, 1);

@@ -167,10 +167,10 @@ button:disabled{opacity:.5;cursor:default}
 .pinset h3{margin-bottom:2px}
 .pinset .muted{margin-bottom:10px}
 .pins{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:6px 14px;max-width:640px}
-.pin{display:grid;grid-template-columns:76px minmax(40px,1fr) minmax(130px,1.2fr);gap:12px;align-items:center;min-height:46px}
+.pin{display:grid;grid-template-columns:124px minmax(40px,1fr) minmax(130px,1.2fr);gap:12px;align-items:center;min-height:46px}
 .pin+.pin{border-top:1px solid var(--line)}
-.gpio{justify-self:start;min-width:64px;height:30px;display:grid;place-items:center;padding:0 10px;background:var(--brand);color:var(--on-brand);border-radius:3px;font:700 18px/1 var(--cond)}
-.gpio.pwr{background:transparent;color:var(--ink);border:1.5px solid var(--rail)}
+.gpio{justify-self:start;min-width:64px;min-height:30px;display:grid;place-items:center;padding:3px 10px;text-align:center;background:var(--brand);color:var(--on-brand);border-radius:3px;font:700 18px/1 var(--cond)}
+.gpio.pwr{background:transparent;color:var(--ink);border:1.5px solid var(--rail);font-size:15px;line-height:1.15}
 .track{height:12px;background-image:linear-gradient(var(--rail),var(--rail)),linear-gradient(var(--rail),var(--rail)),repeating-linear-gradient(90deg,var(--tie) 0 3px,transparent 3px 9px);background-size:100% 2px,100% 2px,100% 100%;background-position:0 1px,0 calc(100% - 1px),0 0;background-repeat:no-repeat}
 .pin.head{min-height:34px;font-size:13px;border-top:0;border-bottom:1px solid var(--line)}
 .pin.head+.pin{border-top:0}

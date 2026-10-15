@@ -19,7 +19,7 @@ struct DisplayCfg {
   std::string oledModel = "SSD1306_32", oledRight = "min"; bool oledHeader = true;
   std::string content = "abfahrt";                    // abfahrt, zugziel, uhr, bild
   std::string stationId, stationName, filter, platform;
-  int rows = 2, interval = 10;
+  int rows = 2, interval = 10; int muxCh = -1;           // muxCh: Kanal am Multiplexer, -1 = automatisch (Reihenfolge der OLEDs)
   std::vector<std::string> imageIds;
 };
 struct Rule {
@@ -28,6 +28,7 @@ struct Rule {
 };
 struct Config {
   bool fDisplays = true, fLight = true, fAudio = true;
+  bool muxOn = false, muxManual = false; int muxAddr = 0x70, muxSda = -1, muxScl = -1;   // I2C-Multiplexer TCA9548A
   std::vector<DisplayCfg> displays;
   bool lightOn = false, dimmable = true, lightInvert = false; int brightness = 100;
   int volume = 60; std::vector<Rule> rules;

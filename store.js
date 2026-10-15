@@ -16,6 +16,7 @@ export const defaultConfig = () => ({
   // Verbaute Funktionen. Fehlt der Eintrag (ältere Geräte), gilt die Funktion als vorhanden.
   board: 'esp32s3',
   features: { displays: true, light: true, audio: true },
+  mux: { on: false, manual: false, addr: 0x70, sda: null, scl: null },   // I²C-Multiplexer TCA9548A für mehr als zwei OLEDs
   displays: [],
   light: { on: false, brightness: 100, dimmable: true, invert: false },
   audio: { volume: 60, rules: [] },

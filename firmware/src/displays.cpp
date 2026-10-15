@@ -24,6 +24,7 @@ static SPIClass tftSpi(VSPI);
 struct Panel {
   DisplayCfg cfg; int w = 0, h = 0; bool ok = false, isOled = false;
   Adafruit_SPITFT* tft = nullptr;
+  int muxCh = -1;
   Adafruit_GFX* og = nullptr; Adafruit_SSD1306* ssd = nullptr; Adafruit_SH1106G* sh = nullptr;
   Scene scene; std::string layout, key; std::vector<std::pair<int, int>> anims; uint32_t lastAnim = 0;
   std::vector<OledLine> oledLn; bool oledAnim = false;
@@ -40,27 +41,47 @@ static const int CELL_W = 320, CELL_H = 96;      // größtes Teilfenster, das a
 // ---------- Anlegen ----------
 static void tftBegin() {
   static bool done = false; if (done) return; done = true;
-  tftSpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, -1);
-  pinMode(PIN_TFT_RST, OUTPUT); digitalWrite(PIN_TFT_RST, HIGH); delay(10); digitalWrite(PIN_TFT_RST, LOW); delay(20); digitalWrite(PIN_TFT_RST, HIGH); delay(120);   // Reset gemeinsam für alle
-  pinMode(PIN_TFT_BL, OUTPUT); digitalWrite(PIN_TFT_BL, HIGH);
+  tftSpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, -1);      // Takt und Daten teilen sich alle TFT-Anzeigen
 }
-static bool makeTft(Panel& p) {
-  const int cs = PIN_TFT_CS[p.cfg.slot - 1]; if (cs < 0) return false;
+static bool makeTft(Panel& p, const TftPins& pins) {
+  if (!pins.ok) { Serial.printf("[anzeige] Platz %d: keine freien Pins mehr\n", p.cfg.slot); return false; }
+  const int cs = pins.cs, dc = pins.dc;
   tftBegin(); pinMode(cs, OUTPUT); digitalWrite(cs, HIGH);
+  pinMode(pins.rst, OUTPUT); digitalWrite(pins.rst, HIGH); delay(10); digitalWrite(pins.rst, LOW); delay(20); digitalWrite(pins.rst, HIGH); delay(120);   // Reset nur dieser Anzeige
+  pinMode(pins.bl, OUTPUT); digitalWrite(pins.bl, HIGH);
   int nw = 240, nh = 320;
-  if (p.cfg.tftModel == "ST7735") { auto* t = new Adafruit_ST7735(&tftSpi, cs, PIN_TFT_DC, -1); t->initR(INITR_BLACKTAB); nw = 128; nh = 160; p.tft = t; }
-  else if (p.cfg.tftModel == "ILI9341") { auto* t = new Adafruit_ILI9341(&tftSpi, PIN_TFT_DC, cs, -1); t->begin(40000000); p.tft = t; }
-  else { auto* t = new Adafruit_ST7789(&tftSpi, cs, PIN_TFT_DC, -1); t->init(240, 320); t->setSPISpeed(40000000); p.tft = t; }
+  if (p.cfg.tftModel == "ST7735") { auto* t = new Adafruit_ST7735(&tftSpi, cs, dc, -1); t->initR(INITR_BLACKTAB); nw = 128; nh = 160; p.tft = t; }
+  else if (p.cfg.tftModel == "ILI9341") { auto* t = new Adafruit_ILI9341(&tftSpi, dc, cs, -1); t->begin(40000000); p.tft = t; }
+  else { auto* t = new Adafruit_ST7789(&tftSpi, cs, dc, -1); t->init(240, 320); t->setSPISpeed(40000000); p.tft = t; }
   p.tft->setRotation(p.cfg.landscape ? 1 : 0);
   p.w = p.cfg.landscape ? nh : nw; p.h = p.cfg.landscape ? nw : nh;
   p.tft->fillScreen(0); return true;
 }
-static bool makeOled(Panel& p, int idx) {
-  static bool wire = false; if (!wire) { Wire.begin(PIN_SDA, PIN_SCL); Wire.setClock(400000); wire = true; }
-  if (idx > 1) return false;
+// ---------- Multiplexer TCA9548A ----------
+// Alle OLEDs hängen am selben Bus (Wire). Vor jedem Zugriff auf eine OLED wird ihr Kanal eingeschaltet.
+static struct { bool on = false; uint8_t addr = 0x70; int sda = -1, scl = -1; int cur = -1; bool started = false; } mux;
+static bool muxSelect(int ch) {
+  if (!mux.on || ch < 0 || ch > 7) return true;
+  if (mux.cur == ch) return true;
+  Wire.beginTransmission(mux.addr); Wire.write((uint8_t)(1 << ch));
+  if (Wire.endTransmission() != 0) { mux.cur = -1; return false; }
+  mux.cur = ch; return true;
+}
+static bool makeOled(Panel& p, int idx, int channel) {
+  TwoWire* bus = &Wire;
+  if (mux.on) {
+    if (!mux.started) { Wire.begin(mux.sda, mux.scl); Wire.setClock(400000); mux.started = true; }
+    if (!muxSelect(channel)) { Serial.printf("[anzeige] Multiplexer 0x%02X nicht gefunden (SDA %d, SCL %d)\n", mux.addr, mux.sda, mux.scl); return false; }
+    p.muxCh = channel;
+  } else {
+    if (idx > 1) return false;
+    bus = idx == 0 ? &Wire : &Wire1;                       // ohne Multiplexer: jede OLED an einem eigenen I2C-Bus
+    static bool started[2] = {false, false};
+    if (!started[idx]) { bus->begin(PIN_SDA[idx], PIN_SCL[idx]); bus->setClock(400000); started[idx] = true; }
+  }
   const bool sh = p.cfg.oledModel.rfind("SH1106", 0) == 0; p.w = 128; p.h = p.cfg.oledModel.find("_32") != std::string::npos ? 32 : 64;
-  if (sh) { p.sh = new Adafruit_SH1106G(p.w, p.h, &Wire, -1); if (!p.sh->begin(OLED_ADDR[idx], true)) return false; p.og = p.sh; }
-  else { p.ssd = new Adafruit_SSD1306(p.w, p.h, &Wire, -1); if (!p.ssd->begin(SSD1306_SWITCHCAPVCC, OLED_ADDR[idx])) return false; p.og = p.ssd; }
+  if (sh) { p.sh = new Adafruit_SH1106G(p.w, p.h, bus, -1); if (!p.sh->begin(OLED_ADDR, true)) return false; p.og = p.sh; }
+  else { p.ssd = new Adafruit_SSD1306(p.w, p.h, bus, -1); if (!p.ssd->begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) return false; p.og = p.ssd; }
   p.og->cp437(false); p.isOled = true; return true;
 }
 static void freePanel(Panel* p) {
@@ -71,17 +92,33 @@ static void freePanel(Panel* p) {
 // Nur wenn sich Bauart, Modell oder Ausrichtung ändern, müssen die Treiber neu angelegt werden.
 static std::string hwSignature(const Config& c) {
   std::string s; if (!c.fDisplays) return s;
-  for (auto& d : c.displays) if (d.slot <= MAX_DISPLAYS) s += std::to_string(d.slot) + (d.oled ? "o" + d.oledModel : "t" + d.tftModel + (d.landscape ? "L" : "P")) + ";";
+  if (c.muxOn) s += "M" + std::to_string(c.muxAddr) + "," + std::to_string(c.muxSda) + "," + std::to_string(c.muxScl) + (c.muxManual ? "m" : "a") + ";";
+  for (auto& d : c.displays) if (d.slot <= P4R_MAX_DISPLAYS) s += std::to_string(d.slot) + (d.oled ? "o" + d.oledModel + (c.muxOn ? "c" + std::to_string(d.muxCh) : "") : "t" + d.tftModel + (d.landscape ? "L" : "P")) + ";";
   return s;
 }
 static void rebuild(const Config& c) {
   const std::string sig = hwSignature(c);
   if (sig != hwSig) {
-    for (auto* p : P) freePanel(p); P.clear(); hwSig = sig; int oledN = 0;
+    for (auto* p : P) freePanel(p); P.clear(); hwSig = sig; int oledN = 0, tftN = 0;
+    // Pins der TFT-Anzeigen: Pool ohne die Pins, an denen eine OLED hängt (Regel wie allocTft in pins.js)
+    int nOled = 0, nTft = 0; std::vector<int> chosen;
+    if (c.fDisplays) for (auto& d : c.displays) if (d.slot <= P4R_MAX_DISPLAYS) { if (d.oled) { nOled++; chosen.push_back(d.muxCh); } else nTft++; }
+    // Multiplexer: Adresse, Busleitungen und Kanäle (Regel wie muxPlan in pins.js)
+    std::vector<int> allowed(TFT_POOL, TFT_POOL + sizeof(TFT_POOL) / sizeof(int)); for (int i = 0; i < 2; i++) { allowed.push_back(PIN_SDA[i]); allowed.push_back(PIN_SCL[i]); }
+    mux.on = c.muxOn; mux.cur = -1; mux.addr = (uint8_t)c.muxAddr;
+    if (!c.muxManual) mux.addr = (uint8_t)MUX_ADDR_DEFAULT;
+    const int newSda = muxPin(c.muxSda, c.muxManual, allowed, PIN_SDA[0]), newScl = muxPin(c.muxScl, c.muxManual, allowed, PIN_SCL[0]);
+    if (mux.started && (newSda != mux.sda || newScl != mux.scl)) { Wire.end(); mux.started = false; }
+    mux.sda = newSda; mux.scl = newScl;
+    const std::vector<int> channels = muxChannels(chosen, c.muxManual);
+    std::vector<int> oledPins; if (c.muxOn) { if (nOled > 0) { oledPins.push_back(mux.sda); oledPins.push_back(mux.scl); } }
+    else for (int i = 0; i < nOled && i < 2; i++) { oledPins.push_back(PIN_SDA[i]); oledPins.push_back(PIN_SCL[i]); }
+    const auto tftPins = allocPins(std::vector<int>(TFT_POOL, TFT_POOL + sizeof(TFT_POOL) / sizeof(int)), oledPins, nTft);
     if (c.fDisplays) for (auto& d : c.displays) {
-      if (d.slot > MAX_DISPLAYS) continue;
+      if (d.slot > P4R_MAX_DISPLAYS) continue;
       auto* p = new Panel; p->cfg = d;
-      p->ok = d.oled ? makeOled(*p, oledN++) : makeTft(*p);
+      p->ok = d.oled ? makeOled(*p, oledN, c.muxOn ? channels[oledN] : -1) : makeTft(*p, tftPins[tftN++]);
+      if (d.oled) oledN++;
       Serial.printf("[anzeige] Platz %d (%s): %s\n", d.slot, d.oled ? d.oledModel.c_str() : d.tftModel.c_str(), p->ok ? "bereit" : "nicht gefunden");
       P.push_back(p);
     }
@@ -200,7 +237,7 @@ static void serviceImages(Panel& p, uint32_t ms) {
 }
 
 // ---------- Zeichnen (OLED) ----------
-static void oledShow(Panel& p) { if (p.ssd) p.ssd->display(); else p.sh->display(); }
+static void oledShow(Panel& p) { muxSelect(p.muxCh); if (p.ssd) p.ssd->display(); else p.sh->display(); }
 static void oledClear(Panel& p) { if (p.ssd) p.ssd->clearDisplay(); else p.sh->clearDisplay(); }
 
 static std::vector<const Dep*> pick(const DisplayCfg& c, const DepData& d, time_t now, bool platformOnly) {

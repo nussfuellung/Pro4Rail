@@ -142,6 +142,29 @@ inline int marqueeOffset(uint32_t tMs, int dist, int speed, int holdMs = 1800) {
   return ph < (uint32_t)holdMs ? 0 : (int)((int64_t)(ph - holdMs) * speed / 1000);
 }
 
+// ---------- Pins der TFT-Anzeigen ----------
+// Gleiche Regel wie allocTft in Pro4Rail/pins.js. Jede TFT bekommt vier eigene Pins (CS, DC, RST, Beleuchtung) aus dem Pool,
+// Pins, an denen eine OLED hängt (oledPins), werden übersprungen. ok = false, wenn der Vorrat nicht reicht.
+struct TftPins { int cs = -1, dc = -1, rst = -1, bl = -1; bool ok = false; };
+inline std::vector<TftPins> allocPins(const std::vector<int>& pool, const std::vector<int>& oledPins, int nTft) {
+  std::vector<int> free_; for (int g : pool) if (std::find(oledPins.begin(), oledPins.end(), g) == oledPins.end()) free_.push_back(g);
+  std::vector<TftPins> out; size_t i = 0;
+  for (int k = 0; k < nTft; k++) {
+    TftPins t; if (i + 4 <= free_.size()) { t.cs = free_[i]; t.dc = free_[i + 1]; t.rst = free_[i + 2]; t.bl = free_[i + 3]; t.ok = true; i += 4; }
+    out.push_back(t);
+  }
+  return out;
+}
+
+// ---------- Multiplexer TCA9548A ----------
+// Kanal jeder OLED (Reihenfolge nach Platz). Eigene Belegung gilt nur, wenn manual gesetzt ist und der Kanal 0 bis 7 ist. Gleiche Regel wie muxPlan in pins.js.
+inline std::vector<int> muxChannels(const std::vector<int>& chosen, bool manual) {
+  std::vector<int> o; for (size_t i = 0; i < chosen.size(); i++) o.push_back(manual && chosen[i] >= 0 && chosen[i] < 8 ? chosen[i] : (int)i);
+  return o;
+}
+// Busleitungen: nur gültig, wenn der Pin in der Liste der erlaubten steht, sonst die Vorgabe
+inline int muxPin(int wanted, bool manual, const std::vector<int>& allowed, int def) { return manual && std::find(allowed.begin(), allowed.end(), wanted) != allowed.end() ? wanted : def; }
+
 // ---------- Ansage-Regeln ----------
 // days: 1 = Montag bis 7 = Sonntag. wday: tm_wday (0 = Sonntag).
 inline bool dayInList(const std::vector<int>& days, int tmWday) { int d = tmWday == 0 ? 7 : tmWday; return std::find(days.begin(), days.end(), d) != days.end(); }

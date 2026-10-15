@@ -42,6 +42,17 @@ int main() {
   // Wochentage
   CHECK(dayInList({1, 2, 3, 4, 5}, 1)); CHECK(!dayInList({1, 2, 3, 4, 5}, 0)); CHECK(dayInList({6, 7}, 0));
   int h, m; CHECK(parseHHMM("07:30", h, m) && h == 7 && m == 30); CHECK(!parseHHMM("25:00", h, m)); CHECK(!parseHHMM("", h, m));
+  // TFT-Pins (gleiche Fälle wie tests/oled.test.mjs)
+  { std::vector<int> s3 = {10, 9, 8, 4, 14, 18, 21, 38, 15, 39, 40, 41, 42, 47, 48}, es = {5, 19, 4, 32, 27, 14, 16, 17, 21, 22, 15};
+    auto a = allocPins(s3, {}, 3); CHECK(a[0].cs == 10 && a[0].dc == 9 && a[0].rst == 8 && a[0].bl == 4); CHECK(a[1].cs == 14 && a[1].dc == 18 && a[1].rst == 21 && a[1].bl == 38); CHECK(a[2].cs == 15 && a[2].dc == 39 && a[2].rst == 40 && a[2].bl == 41);
+    auto b = allocPins(es, {}, 2); CHECK(b[0].cs == 5 && b[0].bl == 32); CHECK(b[1].cs == 27 && b[1].dc == 14 && b[1].rst == 16 && b[1].bl == 17);
+    auto d = allocPins(es, {21, 22}, 1); CHECK(d[0].ok && d[0].cs == 5 && d[0].dc == 19 && d[0].rst == 4 && d[0].bl == 32);
+    auto e = allocPins({5, 19, 4, 32, 27, 14}, {}, 2); CHECK(e[0].ok && !e[1].ok); }
+  // Multiplexer (gleiche Fälle wie tests/oled.test.mjs)
+  { auto a = muxChannels({-1, -1, -1}, false); CHECK(a == (std::vector<int>{0, 1, 2}));
+    auto b = muxChannels({5, 5, -1, 9}, true); CHECK(b == (std::vector<int>{5, 5, 2, 3}));
+    auto c = muxChannels({5, 4}, false); CHECK(c == (std::vector<int>{0, 1}));
+    std::vector<int> ok = {16, 17, 21, 22}; CHECK(muxPin(16, true, ok, 21) == 16); CHECK(muxPin(6, true, ok, 21) == 21); CHECK(muxPin(16, false, ok, 21) == 21); }
   printf("%d von %d Prüfungen bestanden\n", total - fails, total);
   return fails ? 1 : 0;
 }
